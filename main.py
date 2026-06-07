@@ -8,7 +8,10 @@ app = Flask(__name__)
 
 
 def verify_key(req):
-    return req.headers.get("X-API-Key", "") == API_SECRET_KEY
+    received_key = req.headers.get("X-API-Key", "")
+    print(f"[AUTH] Received key: '{received_key}'")
+    print(f"[AUTH] Expected key: '{API_SECRET_KEY}'")
+    return received_key == API_SECRET_KEY
 
 
 @app.route("/health", methods=["GET"])

@@ -1,3 +1,4 @@
+import os
 import time
 import random
 import logging
@@ -6,6 +7,7 @@ import requests
 from urllib.parse import urlparse
 from datetime import datetime, timezone, timedelta
 from utils.hashing import compute_hash
+from config import BROWSER_SERVICE_URL
 from database.supabase_client import hash_exists, insert_raw_item, insert_processing_job, update_source_last_polled
 
 log = logging.getLogger(__name__)
@@ -84,6 +86,62 @@ def get_content(entry):
     return entry.get('title', '')
 
 
+def fetch_via_browser_service(url: str, source_name: str):
+    """
+    Call the browser microservice to fetch a URL that blocked direct HTTP.
+    Returns feedparser feed object or raises on failure.
+    """
+    if not BROWSER_SERVICE_URL:
+        raise RuntimeError("BROWSER_SERVICE_URL not configured")
+    api_key = os.getenv("API_SECRET_KEY", "")
+    resp = requests.post(
+        f"{BROWSER_SERVICE_URL}/fetch",
+        json={"url": url, "source_name": source_name},
+        headers={"X-API-Key": api_key},
+        timeout=60,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("status") == "failed":
+        raise RuntimeError(f"Browser service error: {data.get('error')}")
+    content = data.get("content", "")
+    return feedparser.parse(content)
+
+
+def _process_feed(feed, source_id, source_name, stats):
+    """Process a parsed feed's entries into raw_items + processing_jobs."""
+    if feed.bozo and not feed.entries:
+        stats['errors'].append(f'Parse error: {feed.bozo_exception}')
+        update_source_last_polled(source_id, error=True)
+        return stats
+    print(f'      {len(feed.entries)} entries found')
+    for entry in feed.entries:
+        if not is_recent(entry):
+            continue
+        stats['fetched'] += 1
+        title = entry.get('title', '').strip()
+        url = entry.get('link', '').strip()
+        content = get_content(entry)
+        pub_date = parse_date(entry)
+        if not url:
+            stats['skipped'] += 1
+            continue
+        content_hash = compute_hash(title, url, pub_date)
+        if hash_exists(content_hash):
+            stats['skipped'] += 1
+            print(f'      Duplicate: {title[:60]}')
+            continue
+        raw_item_id = insert_raw_item(source_id, url, title, content, content_hash, pub_date)
+        if raw_item_id:
+            insert_processing_job(raw_item_id)
+            stats['inserted'] += 1
+            print(f'      OK: {title[:60]}')
+        else:
+            stats['errors'].append(f'Insert failed: {title[:60]}')
+    update_source_last_polled(source_id)
+    return stats
+
+
 def fetch_source(source, session=None):
     source_id = source['id']
     source_url = source['url']
@@ -100,40 +158,24 @@ def fetch_source(source, session=None):
         except requests.exceptions.SSLError as ssl_err:
             log.warning(f"[RSS] SSL error for {source_name}, retrying with verify=False: {ssl_err}")
             response = session.get(source_url, headers=headers, timeout=FEED_TIMEOUT, verify=False)
+        if response.status_code in (403, 429):
+            log.info(f"[RSS] Browser fallback for {source_name} (HTTP {response.status_code})")
+            log.info(f"[RSS] Using browser service fallback for {source_name}")
+            feed = fetch_via_browser_service(source_url, source_name)
+            return _process_feed(feed, source_id, source_name, stats)
         response.raise_for_status()
         feed = feedparser.parse(response.content)
-        if feed.bozo and not feed.entries:
-            stats['errors'].append(f'Parse error: {feed.bozo_exception}')
+        return _process_feed(feed, source_id, source_name, stats)
+    except requests.exceptions.Timeout:
+        log.info(f"[RSS] Browser fallback for {source_name} (timeout)")
+        log.info(f"[RSS] Using browser service fallback for {source_name}")
+        try:
+            feed = fetch_via_browser_service(source_url, source_name)
+            return _process_feed(feed, source_id, source_name, stats)
+        except Exception as browser_err:
+            stats['errors'].append(f"Browser fallback failed: {str(browser_err)[:100]}")
             update_source_last_polled(source_id, error=True)
             return stats
-        print(f'      {len(feed.entries)} entries found')
-        for entry in feed.entries:
-            if not is_recent(entry):
-                continue
-            stats['fetched'] += 1
-            title = entry.get('title', '').strip()
-            url = entry.get('link', '').strip()
-            content = get_content(entry)
-            pub_date = parse_date(entry)
-            if not url:
-                stats['skipped'] += 1
-                continue
-            content_hash = compute_hash(title, url, pub_date)
-            if hash_exists(content_hash):
-                stats['skipped'] += 1
-                print(f'      Duplicate: {title[:60]}')
-                continue
-            raw_item_id = insert_raw_item(source_id, url, title, content, content_hash, pub_date)
-            if raw_item_id:
-                insert_processing_job(raw_item_id)
-                stats['inserted'] += 1
-                print(f'      OK: {title[:60]}')
-            else:
-                stats['errors'].append(f'Insert failed: {title[:60]}')
-        update_source_last_polled(source_id)
-    except requests.exceptions.Timeout:
-        stats['errors'].append(f'Timeout after {FEED_TIMEOUT}s')
-        update_source_last_polled(source_id, error=True)
     except Exception as e:
         stats['errors'].append(str(e)[:100])
         update_source_last_polled(source_id, error=True)

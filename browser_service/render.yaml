@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: cti-browser-service
+    runtime: docker
+    dockerfilePath: ./browser_service/Dockerfile
+    dockerContext: ./browser_service
+    envVars:
+      - key: API_SECRET_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+    healthCheckPath: /health
+    port: 5001

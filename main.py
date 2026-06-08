@@ -1,5 +1,6 @@
 import os
 import logging
+import requests
 from flask import Flask, request, jsonify
 from datetime import datetime, timezone
 from config import API_SECRET_KEY, PORT
@@ -149,6 +150,88 @@ def status():
         }), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/feeds/health", methods=["GET"])
+def feeds_health():
+    """Monitoring endpoint — checks reachability of all active feed sources via HEAD."""
+    from ingestion.rss import get_browser_headers
+
+    try:
+        sources = get_active_sources()
+    except Exception as e:
+        log.error(f"[FEEDS_HEALTH] Failed to load sources: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    results = []
+    healthy = 0
+    broken = 0
+    for source in sources:
+        name = source.get("name", "")
+        url = source.get("url", "")
+        headers = get_browser_headers(url)
+        entry = {"name": name, "url": url, "status": None}
+        try:
+            resp = requests.head(url, headers=headers, timeout=10, allow_redirects=True)
+            if resp.status_code == 405:
+                # Some servers reject HEAD — fall back to a streamed GET without downloading the body.
+                resp = requests.get(url, headers=headers, timeout=10, allow_redirects=True, stream=True)
+                resp.close()
+            entry["status"] = resp.status_code
+            if resp.status_code < 400:
+                healthy += 1
+            else:
+                broken += 1
+                entry["error"] = f"HTTP {resp.status_code}"
+        except Exception as e:
+            broken += 1
+            entry["status"] = None
+            entry["error"] = str(e)[:200]
+        results.append(entry)
+
+    total = len(sources)
+    log.info(f"[FEEDS_HEALTH] total={total} healthy={healthy} broken={broken}")
+
+    return jsonify({
+        "total_sources": total,
+        "healthy": healthy,
+        "broken": broken,
+        "results": results
+    }), 200
+
+
+@app.route("/enrich", methods=["POST"])
+def enrich():
+    """Auth-protected — runs Gemini AI enrichment on pending processing jobs."""
+    if not verify_key(request):
+        log.warning("[ENRICH] Unauthorized request blocked")
+        return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
+
+    limit = 50
+    if request.is_json and request.json:
+        try:
+            limit = int(request.json.get("limit", 50))
+        except (TypeError, ValueError):
+            limit = 50
+    limit = max(1, min(limit, 100))
+
+    log.info(f"[ENRICH] Starting enrichment — limit={limit}")
+    try:
+        from enrichment.gemini import run_enrichment
+        stats = run_enrichment(limit=limit)
+    except Exception as e:
+        log.error(f"[ENRICH] Enrichment run failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    log.info(
+        f"[ENRICH] Done — processed={stats.get('processed')} "
+        f"succeeded={stats.get('succeeded')} failed={stats.get('failed')}"
+    )
+    return jsonify({
+        "status": "success",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        **stats
+    }), 200
 
 
 # ── Entry point ──────────────────────────────────────────────

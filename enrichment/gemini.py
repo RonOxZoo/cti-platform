@@ -173,27 +173,50 @@ def call_gemini(prompt):
         raise RuntimeError(f"Failed to parse Gemini JSON: {e}; raw={cleaned[:300]}")
 
 
-def insert_intelligence_item(job, result):
-    """Insert an enriched intelligence item into intelligence_items."""
-    payload = {
+def build_intelligence_payload(job, result):
+    """Map Gemini's JSON output onto the real intelligence_items columns.
+
+    IOCs/CVEs/actors/MITRE are consolidated into the `enrichment_data` jsonb
+    column; the rest map to dedicated typed columns.
+    """
+    category = (result.get("category") or "").strip()
+    try:
+        confidence = int(result.get("confidence"))
+    except (TypeError, ValueError):
+        confidence = None
+    return {
         "raw_item_id": job["raw_item_id"],
-        "source_id": job["source_id"],
-        "category": result["category"],
-        "severity": result["severity"],
-        "severity_reason": result["severity_reason"],
-        "confidence": result["confidence"],
-        "confidence_reason": result["confidence_reason"],
-        "iocs": result["iocs"],
-        "cves": result["cves"],
-        "actors": result["actors"],
-        "mitre": result["mitre"],
-        "summary_en": result["summary_en"],
-        "summary_he": result["summary_he"],
-        "israel_relevance": result["israel_relevance"],
-        "iran_nexus": result["iran_nexus"],
-        "enriched_at": datetime.now(timezone.utc).isoformat(),
+        "severity": result.get("severity"),
+        "severity_rationale": result.get("severity_reason"),
+        "confidence_score": confidence,
+        "confidence_rationale": result.get("confidence_reason"),
+        # categories is a text[] — wrap the single Gemini category.
+        "categories": [category] if category else [],
+        "summary_en": result.get("summary_en"),
+        "summary_he": result.get("summary_he"),
+        "israel_relevance": bool(result.get("israel_relevance", False)),
+        "iran_nexus": bool(result.get("iran_nexus", False)),
+        # All IOC-style structured output lives in the jsonb column.
+        "enrichment_data": {
+            "iocs": result.get("iocs", {}),
+            "cves": result.get("cves", []),
+            "actors": result.get("actors", []),
+            "mitre": result.get("mitre", []),
+        },
+        "gemini_processed": True,
+        "processed_at": datetime.now(timezone.utc).isoformat(),
     }
-    client.table("intelligence_items").insert(payload).execute()
+
+
+def insert_intelligence_item(job, result):
+    """Upsert an enriched intelligence item, keyed on raw_item_id.
+
+    Upsert (ON CONFLICT raw_item_id) means a re-processed item updates its row
+    in place instead of creating a duplicate. Requires a unique index on
+    raw_item_id (see sql/fix_intelligence_items.sql).
+    """
+    payload = build_intelligence_payload(job, result)
+    client.table("intelligence_items").upsert(payload, on_conflict="raw_item_id").execute()
 
 
 def update_job_status(job_id, status, error=None):

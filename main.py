@@ -1,8 +1,9 @@
 import os
+import json
 import logging
 import requests
 from flask import Flask, request, jsonify
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from config import API_SECRET_KEY, PORT
 from database.supabase_client import get_active_sources, write_ingestion_log
 from ingestion.rss import run_rss_ingestion
@@ -33,7 +34,7 @@ def root():
         "service": "CTI Platform",
         "status": "online",
         "version": "1.1.0",
-        "endpoints": ["/health", "/ingest"]
+        "endpoints": ["/health", "/ingest", "/enrich", "/cleanup", "/status", "/feeds/health"]
     }), 200
 
 
@@ -132,24 +133,116 @@ def ingest():
     }), 200
 
 
+def _month_bounds(now=None):
+    """Return (prev_month_start, current_month_start, next_month_start) in UTC.
+
+    With the rolling 2-month policy, prev_month_start is also the retention
+    cutoff: anything strictly before it gets deleted.
+    """
+    now = now or datetime.now(timezone.utc)
+    cur_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if cur_start.month == 1:
+        prev_start = cur_start.replace(year=cur_start.year - 1, month=12)
+        next_start = cur_start.replace(month=2)
+    elif cur_start.month == 12:
+        prev_start = cur_start.replace(month=11)
+        next_start = cur_start.replace(year=cur_start.year + 1, month=1)
+    else:
+        prev_start = cur_start.replace(month=cur_start.month - 1)
+        next_start = cur_start.replace(month=cur_start.month + 1)
+    return prev_start, cur_start, next_start
+
+
 @app.route("/status", methods=["GET"])
 def status():
-    """Returns the last ingestion log entry — useful for monitoring."""
+    """Monitoring — last run, retention-window counts, and next cleanup date."""
+    from database.supabase_client import client
+    now = datetime.now(timezone.utc)
+    prev_start, cur_start, next_start = _month_bounds(now)
+
+    def safe(fn, default=None):
+        """Run a metric query, swallowing errors (e.g. a column not yet migrated)."""
+        try:
+            return fn()
+        except Exception as e:
+            log.warning(f"[STATUS] metric unavailable: {str(e)[:120]}")
+            return default
+
+    payload = {
+        "status": "ok",
+        "timestamp": now.isoformat(),
+        "retention_policy": "current month + previous full month",
+        "retention_cutoff": prev_start.isoformat(),
+        "next_cleanup_date": next_start.date().isoformat(),
+        "last_run": safe(lambda: (client.table("ingestion_logs")
+                                  .select("*").order("started_at", desc=True)
+                                  .limit(1).execute().data or [None])[0]),
+        "current_month_items": safe(lambda: client.table("raw_items")
+                                    .select("id", count="exact")
+                                    .gte("ingested_at", cur_start.isoformat())
+                                    .execute().count),
+        "previous_month_items": safe(lambda: client.table("raw_items")
+                                     .select("id", count="exact")
+                                     .gte("ingested_at", prev_start.isoformat())
+                                     .lt("ingested_at", cur_start.isoformat())
+                                     .execute().count),
+        "archived_items": safe(lambda: client.table("intelligence_items")
+                               .select("id", count="exact")
+                               .eq("archived", True).execute().count),
+        "oldest_active_record": safe(lambda: ((client.table("raw_items")
+                                    .select("ingested_at")
+                                    .order("ingested_at", desc=False)
+                                    .limit(1).execute().data or [{}])[0]
+                                    .get("ingested_at"))),
+    }
+    return jsonify(payload), 200
+
+
+@app.route("/cleanup", methods=["POST"])
+def cleanup():
+    """Auth-protected — runs the Supabase data-retention function on demand.
+
+    The scheduled monthly run is driven by pg_cron inside Postgres; this
+    endpoint is for manual triggering and returns the function's jsonb result.
+    """
+    if not verify_key(request):
+        log.warning("[CLEANUP] Unauthorized request blocked")
+        return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
+
+    from database.supabase_client import client
+    started_at = datetime.now(timezone.utc).isoformat()
+    log.info("[CLEANUP] Running cleanup_old_data()")
     try:
-        from database.supabase_client import client
-        result = client.table("ingestion_logs") \
-            .select("*") \
-            .order("started_at", desc=True) \
-            .limit(1) \
-            .execute()
-        last_run = result.data[0] if result.data else None
-        return jsonify({
-            "status": "ok",
-            "last_run": last_run,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }), 200
+        result = client.rpc("cleanup_old_data", {}).execute().data
     except Exception as e:
+        log.error(f"[CLEANUP] cleanup_old_data() failed: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+    cutoff = result.get("cutoff_date") if isinstance(result, dict) else None
+    log.info(f"[CLEANUP] Done — cutoff={cutoff} result={result}")
+
+    # Audit trail.
+    try:
+        client.table("ingestion_logs").insert({
+            "scenario_name": "monthly_cleanup",
+            "started_at": started_at,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "status": "success",
+            "items_fetched": 0,
+            "items_inserted": 0,
+            "items_skipped_dedup": 0,
+            "errors": [],
+            "make_execution_id": f"cleanup cutoff={cutoff} {json.dumps(result)[:300]}",
+        }).execute()
+    except Exception as e:
+        log.error(f"[CLEANUP] Failed to write ingestion_log: {e}")
+
+    return jsonify({
+        "status": "success",
+        "cutoff_date": cutoff,
+        "result": result,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }), 200
 
 
 @app.route("/feeds/health", methods=["GET"])

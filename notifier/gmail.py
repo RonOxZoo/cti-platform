@@ -144,6 +144,25 @@ def send_weekly_report(report_html: str, stats: dict) -> bool:
     return _send(subject, html=report_html, text=text)
 
 
+def send_monthly_report(report_html: str, stats: dict) -> bool:
+    """Send the monthly strategic intelligence report as an HTML email.
+
+    Subject: CTI Monthly Strategic Brief — [MONTH]
+    """
+    stats = stats or {}
+    month = stats.get("report_month") or _today_str()[:7]
+    subject = f"CTI Monthly Strategic Brief — {month}"
+
+    text = (
+        f"CTI Monthly Strategic Brief — {month}\n"
+        f"Items: {stats.get('total', 0)} | Critical: {_sev(stats, 'critical')} | "
+        f"High: {_sev(stats, 'high')}\n"
+        f"Israel-relevant: {_sev(stats, 'israel')} | Iran-nexus: {_sev(stats, 'iran_nexus')}\n\n"
+        "This report is best viewed in an HTML-capable mail client."
+    )
+    return _send(subject, html=report_html, text=text)
+
+
 def send_error_alert(service: str, error: str) -> bool:
     """Send a plain-text error alert email.
 

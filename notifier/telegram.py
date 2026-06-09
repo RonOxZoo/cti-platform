@@ -213,6 +213,27 @@ def send_weekly_summary(stats: dict) -> bool:
     return send_message(text)
 
 
+def send_monthly_summary(stats: dict) -> bool:
+    """Send a monthly strategic report summary."""
+    stats = stats or {}
+    month = stats.get("report_month", "")
+    prev = stats.get("previous_month") or {}
+    delta = (stats.get("total", 0) or 0) - (prev.get("total", 0) or 0)
+    arrow = "📈" if delta > 0 else ("📉" if delta < 0 else "➡️")
+
+    text = (
+        f"🗓 <b>CTI Monthly Strategic Brief</b> — {_esc(month)}\n\n"
+        f"📊 Items: {_esc(stats.get('total', 0))} {arrow} ({'+' if delta >= 0 else ''}{_esc(delta)} vs last month)\n"
+        f"🔴 Critical: {_esc(stats.get('critical', 0))} | "
+        f"🟠 High: {_esc(stats.get('high', 0))}\n"
+        f"🇮🇱 Israel: {_esc(stats.get('israel', 0))} | "
+        f"🌐 Iran nexus: {_esc(stats.get('iran_nexus', 0))}\n"
+        f"📚 Weekly reports synthesised: {_esc(stats.get('weekly_reports', 0))}\n\n"
+        f"🔥 Top actors: {_fmt_top(stats.get('top_actors'))}"
+    )
+    return send_message(text)
+
+
 def notify_enrichment_complete(stats: dict) -> bool:
     """Send a notification when an enrichment batch completes.
 

@@ -60,7 +60,9 @@ def root():
         "endpoints": ["/health", "/ingest", "/enrich", "/cleanup", "/status",
                       "/feeds/health", "/ask", "/search", "/trending",
                       "/notify/test", "/notify/daily",
-                      "/report/daily", "/report/preview"]
+                      "/report/daily", "/report/preview",
+                      "/report/weekly", "/report/weekly/preview",
+                      "/report/monthly", "/report/monthly/preview"]
     }), 200
 
 
@@ -617,6 +619,173 @@ def report_preview():
         report = generate_daily_report(date)
     except Exception as e:
         log.error(f"[REPORT] Preview generation failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    return report["html"], 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+def _top_pairs_to_dicts(pairs):
+    """Convert Counter.most_common() [(value, count), ...] to the
+    [{"value","count"}, ...] shape the Telegram formatters expect."""
+    out = []
+    for p in (pairs or []):
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            out.append({"value": p[0], "count": p[1]})
+        elif isinstance(p, dict):
+            out.append(p)
+        else:
+            out.append({"value": p, "count": None})
+    return out
+
+
+@app.route("/report/weekly", methods=["POST"])
+def report_weekly():
+    """Auth-protected — generate the weekly report, email it, post a Telegram
+    summary. Email/Telegram delivery is best-effort and never raises."""
+    if not verify_key(request):
+        log.warning("[REPORT] Unauthorized request blocked")
+        return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
+
+    days = 7
+    if request.is_json and request.json:
+        try:
+            days = int(request.json.get("days", 7))
+        except (TypeError, ValueError):
+            days = 7
+
+    try:
+        from reporting.weekly import generate_weekly_report
+        report = generate_weekly_report(days)
+    except Exception as e:
+        log.error(f"[REPORT] Weekly report generation failed: {e}")
+        try:
+            from notifier.gmail import send_error_alert
+            send_error_alert("report/weekly", str(e))
+        except Exception:
+            pass
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    stats = report["stats"]
+
+    email_sent = False
+    try:
+        from notifier.gmail import send_weekly_report
+        email_sent = send_weekly_report(report["html"], stats)
+    except Exception as e:
+        log.error(f"[REPORT] Weekly email send raised: {e}")
+
+    telegram_sent = False
+    try:
+        from notifier.telegram import send_weekly_summary
+        telegram_sent = send_weekly_summary({
+            "start_date": stats.get("start_date"),
+            "end_date": stats.get("end_date"),
+            "items_enriched": stats.get("total", 0),
+            "critical": stats.get("critical", 0),
+            "high": stats.get("high", 0),
+            "medium": stats.get("medium", 0),
+            "top_actors": _top_pairs_to_dicts(stats.get("top_actors")),
+            "top_cves": _top_pairs_to_dicts(stats.get("top_cves")),
+            "top_categories": _top_pairs_to_dicts(stats.get("top_categories")),
+        })
+    except Exception as e:
+        log.error(f"[REPORT] Weekly Telegram summary raised: {e}")
+
+    return jsonify({
+        "status": "sent" if email_sent else "error",
+        "email_sent": email_sent,
+        "telegram_sent": telegram_sent,
+        "stats": stats,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }), (200 if email_sent else 502)
+
+
+@app.route("/report/monthly", methods=["POST"])
+def report_monthly():
+    """Auth-protected — generate the monthly strategic report, email it, post a
+    Telegram summary. Email/Telegram delivery is best-effort and never raises."""
+    if not verify_key(request):
+        log.warning("[REPORT] Unauthorized request blocked")
+        return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
+
+    month = None
+    if request.is_json and request.json:
+        month = request.json.get("month") or None
+
+    try:
+        from reporting.monthly import generate_monthly_report
+        report = generate_monthly_report(month)
+    except Exception as e:
+        log.error(f"[REPORT] Monthly report generation failed: {e}")
+        try:
+            from notifier.gmail import send_error_alert
+            send_error_alert("report/monthly", str(e))
+        except Exception:
+            pass
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    stats = report["stats"]
+
+    email_sent = False
+    try:
+        from notifier.gmail import send_monthly_report
+        email_sent = send_monthly_report(report["html"], stats)
+    except Exception as e:
+        log.error(f"[REPORT] Monthly email send raised: {e}")
+
+    telegram_sent = False
+    try:
+        from notifier.telegram import send_monthly_summary
+        telegram_sent = send_monthly_summary({
+            **stats,
+            "top_actors": _top_pairs_to_dicts(stats.get("top_actors")),
+        })
+    except Exception as e:
+        log.error(f"[REPORT] Monthly Telegram summary raised: {e}")
+
+    return jsonify({
+        "status": "sent" if email_sent else "error",
+        "email_sent": email_sent,
+        "telegram_sent": telegram_sent,
+        "stats": stats,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }), (200 if email_sent else 502)
+
+
+@app.route("/report/weekly/preview", methods=["GET"])
+def report_weekly_preview():
+    """Auth-protected — return the raw weekly report HTML (?days=7)."""
+    if not verify_key(request):
+        log.warning("[REPORT] Unauthorized request blocked")
+        return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
+
+    try:
+        days = int(request.args.get("days", 7))
+    except (TypeError, ValueError):
+        days = 7
+    try:
+        from reporting.weekly import generate_weekly_report
+        report = generate_weekly_report(days)
+    except Exception as e:
+        log.error(f"[REPORT] Weekly preview failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    return report["html"], 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@app.route("/report/monthly/preview", methods=["GET"])
+def report_monthly_preview():
+    """Auth-protected — return the raw monthly report HTML (?month=YYYY-MM)."""
+    if not verify_key(request):
+        log.warning("[REPORT] Unauthorized request blocked")
+        return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
+
+    month = request.args.get("month") or None
+    try:
+        from reporting.monthly import generate_monthly_report
+        report = generate_monthly_report(month)
+    except Exception as e:
+        log.error(f"[REPORT] Monthly preview failed: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
     return report["html"], 200, {"Content-Type": "text/html; charset=utf-8"}

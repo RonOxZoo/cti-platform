@@ -46,8 +46,6 @@ from global sources with special focus on:
 
 INPUT: A raw intelligence item with title and content.
 
-YOUR TASK: Produce a comprehensive structured intelligence assessment.
-
 STEP 1 — FULL EXTRACTION:
 Extract ALL of the following if present:
 - IP addresses (IPv4 and IPv6)
@@ -65,7 +63,7 @@ Extract ALL of the following if present:
 - C2 infrastructure indicators
 
 STEP 2 — DEEP CATEGORIZATION:
-Primary category (pick ONE most relevant):
+Primary category (pick ONE):
 global_ti, apt, israel, iran_nexus, phishing, cves, ics, research
 
 Secondary tags (pick ALL that apply):
@@ -73,74 +71,43 @@ ransomware, espionage, data_breach, zero_day, supply_chain,
 critical_infrastructure, financial, healthcare, government,
 defense, telecom, energy, middle_east, nation_state, criminal
 
-STEP 3 — SEVERITY ASSESSMENT:
-Rate severity with detailed justification:
-- CRITICAL: Active exploitation, zero-day, critical infrastructure attack,
+STEP 3 — SEVERITY:
+CRITICAL: Active exploitation, zero-day, critical infrastructure attack,
   mass impact, Israeli target under active attack
-- HIGH: Nation-state campaign, known APT active, sensitive sector targeted,
-  high CVSS score (8.0+), Israeli/Iranian nexus
-- MEDIUM: Known vulnerability, targeted phishing, criminal campaign,
-  medium CVSS (4.0-7.9)
-- LOW: Research disclosure, patched vulnerability, historical analysis,
-  low CVSS (<4.0)
+HIGH: Nation-state campaign, known APT active, sensitive sector targeted,
+  CVSS 8.0+, Israeli/Iranian nexus
+MEDIUM: Known vulnerability, targeted phishing, criminal campaign, CVSS 4-7.9
+LOW: Research, patched vulnerability, historical analysis, CVSS <4.0
 
-STEP 4 — CONFIDENCE SCORING (0-100):
-Score based on:
-- Source reputation (known vendor = higher)
-- IOC specificity (specific hashes/IPs = higher)
-- Attribution confidence (named APT with evidence = higher)
-- Corroboration (multiple sources = higher)
-State exactly what would increase confidence.
+STEP 4 — CONFIDENCE (0-100):
+Score based on source reputation, IOC specificity, attribution confidence.
+State what would increase the score.
 
-STEP 5 — ISRAEL/IRAN RELEVANCE:
-israel_relevance = true if:
-- Israeli organization targeted or mentioned
-- Israeli threat actor mentioned
-- INCD/Israeli CERT advisory
-- Impact on Israeli infrastructure or citizens
-
-iran_nexus = true if:
-- Iranian APT (APT33, APT34, APT35, Charming Kitten, etc.)
-- Iranian government or IRGC linked
-- Iran-Israel cyber conflict context
-- Iranian infrastructure mentioned
+STEP 5 — ISRAEL/IRAN FLAGS:
+israel_relevance = true if Israeli org targeted, Israeli actor, INCD advisory
+iran_nexus = true if Iranian APT, IRGC linked, Iran-Israel conflict context
 
 STEP 6 — PROFESSIONAL SUMMARIES:
-Write a 5-7 sentence professional intelligence summary in English.
-Cover: what happened, who is involved, what was targeted,
-what TTPs were used, what the impact/risk is, what defenders should do.
+Write 5-7 sentence English summary covering:
+what happened, who is involved, what was targeted, TTPs used,
+impact/risk, what defenders should do.
 
-Then write the SAME summary in professional Hebrew.
-Use correct Hebrew cybersecurity terminology:
-- גורם איום (threat actor)
-- פרצת אבטחה (vulnerability)
-- תוכנת כופר (ransomware)
-- תקיפת סייבר (cyber attack)
-- מודיעין איומים (threat intelligence)
-- תשתית קריטית (critical infrastructure)
-- קמפיין תקיפה (attack campaign)
-- סממן פשרה (IOC - indicator of compromise)
+Then write identical summary in professional Hebrew using:
+גורם איום, פרצת אבטחה, תוכנת כופר, תקיפת סייבר,
+מודיעין איומים, תשתית קריטית, קמפיין תקיפה, סממן פשרה
 
-STEP 7 — CONTRADICTION CHECK:
-Note if this conflicts with any common knowledge about the actor/CVE.
-
-OUTPUT FORMAT:
-Return ONLY valid JSON. No preamble. No markdown fences. No explanation.
+OUTPUT — return ONLY valid JSON:
 {
   "category": "global_ti|apt|israel|iran_nexus|phishing|cves|ics|research",
-  "tags": ["tag1", "tag2"],
+  "tags": [],
   "severity": "critical|high|medium|low",
-  "severity_reason": "one detailed sentence",
-  "confidence": 0-100,
-  "confidence_reason": "explanation of score and what would raise it",
+  "severity_reason": "detailed one sentence",
+  "confidence": 0,
+  "confidence_reason": "explanation",
   "iocs": {
-    "ips": [],
-    "domains": [],
-    "urls": [],
+    "ips": [], "domains": [], "urls": [],
     "hashes": {"md5": [], "sha1": [], "sha256": []},
-    "emails": [],
-    "malware_families": [],
-    "c2_servers": []
+    "emails": [], "malware_families": [], "c2_servers": []
   },
   "cves": [],
   "actors": [],

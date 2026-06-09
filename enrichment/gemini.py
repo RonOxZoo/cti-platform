@@ -3,9 +3,10 @@ Gemini AI enrichment — processes pending jobs from processing_jobs table.
 Sends raw_items content to Gemini 2.0 Flash, parses the JSON response,
 and inserts results into intelligence_items table.
 
-Tuned for the FREE Gemini API tier: a fixed delay between calls, a single
-retry with back-off on 429 rate-limit errors, and a hard cap on the number
-of items processed per run.
+Tuned for the FREE Gemini API tier: a fixed delay between calls, a hard cap
+on the number of items processed per run, and a strict no-retry policy on 429
+rate-limit errors. When the daily quota is hit we record it and skip the next
+run entirely instead of burning through the remaining quota with retries.
 """
 import os
 import json
@@ -23,9 +24,12 @@ log = logging.getLogger(__name__)
 GEMINI_MODEL = "gemini-2.0-flash"
 
 # Free-tier rate-limit protection.
-CALL_DELAY_SECONDS = 2        # delay between consecutive Gemini calls
-RATE_LIMIT_BACKOFF = 60       # wait this long after a 429 before retrying
-MAX_ITEMS_PER_RUN = 10        # hard cap on items processed per /enrich call
+CALL_DELAY_SECONDS = 5        # delay between consecutive Gemini calls
+MAX_ITEMS_PER_RUN = 3         # hard cap on items processed per /enrich call
+
+# ingestion_logs scenario name used to record enrichment quota state. Kept
+# distinct from the RSS scenario so RSS runs don't overwrite the quota marker.
+ENRICHMENT_SCENARIO = "python_gemini_enrichment"
 
 SYSTEM_INSTRUCTION = """ROLE: You are a Cyber Threat Intelligence analyst-agent for an OSINT platform.
 You process ONLY lawfully-obtained, publicly-published sources.
@@ -134,7 +138,8 @@ def _is_rate_limit_error(err) -> bool:
 def call_gemini(prompt):
     """Call Gemini and return the parsed JSON dict. Raises on failure.
 
-    On a 429 rate-limit error, waits RATE_LIMIT_BACKOFF seconds and retries once.
+    No retries: on a 429 rate-limit error the exception propagates so the caller
+    can stop the run and preserve the remaining daily quota.
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -143,17 +148,7 @@ def call_gemini(prompt):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(GEMINI_MODEL)
 
-    try:
-        response = model.generate_content(prompt)
-    except Exception as e:
-        if _is_rate_limit_error(e):
-            log.warning(
-                f"[GEMINI] Rate limit (429) hit — waiting {RATE_LIMIT_BACKOFF}s before one retry"
-            )
-            time.sleep(RATE_LIMIT_BACKOFF)
-            response = model.generate_content(prompt)
-        else:
-            raise
+    response = model.generate_content(prompt)
 
     # Log token usage if available.
     try:
@@ -212,13 +207,93 @@ def update_job_status(job_id, status, error=None):
         log.error(f"[GEMINI] update_job_status failed for {job_id}: {e}")
 
 
+def mark_job_pending(job_id):
+    """Return a job to the pending queue, clearing any prior error.
+
+    Used when we stop a run early (e.g. on a 429) so the untouched job is
+    retried on the next run rather than being marked failed."""
+    try:
+        client.table("processing_jobs").update(
+            {"status": "pending", "error_message": None}
+        ).eq("id", job_id).execute()
+    except Exception as e:
+        log.error(f"[GEMINI] mark_job_pending failed for {job_id}: {e}")
+
+
+def reset_failed_jobs():
+    """Reset every failed job back to pending so it's eligible again.
+
+    Many past failures were transient 429s, so we give them another chance on
+    each run instead of leaving them stuck in 'failed'."""
+    try:
+        result = (
+            client.table("processing_jobs")
+            .update({"status": "pending", "retries": 0, "error_message": None})
+            .eq("status", "failed")
+            .execute()
+        )
+        count = len(result.data or [])
+        if count:
+            log.info(f"[GEMINI] Reset {count} failed job(s) back to pending")
+    except Exception as e:
+        log.error(f"[GEMINI] reset_failed_jobs failed: {e}")
+
+
+def _last_run_quota_exceeded():
+    """True if the most recent enrichment log recorded a quota_exceeded status."""
+    try:
+        result = (
+            client.table("ingestion_logs")
+            .select("status")
+            .eq("scenario_name", ENRICHMENT_SCENARIO)
+            .order("started_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            return result.data[0].get("status") == "quota_exceeded"
+    except Exception as e:
+        log.error(f"[GEMINI] quota-state check failed: {e}")
+    return False
+
+
+def _log_quota_exceeded(started_at, items_processed):
+    """Record a quota_exceeded marker in ingestion_logs so the next run skips."""
+    try:
+        client.table("ingestion_logs").insert({
+            "scenario_name": ENRICHMENT_SCENARIO,
+            "started_at": started_at,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "status": "quota_exceeded",
+            "items_fetched": items_processed,
+            "items_inserted": 0,
+            "items_skipped_dedup": 0,
+            "errors": ["Daily Gemini quota reached (429)"],
+            "make_execution_id": "",
+        }).execute()
+    except Exception as e:
+        log.error(f"[GEMINI] failed to write quota_exceeded log: {e}")
+
+
 def run_enrichment(limit=50):
     """Main orchestrator — enrich pending jobs one by one.
 
     Processes at most MAX_ITEMS_PER_RUN items per call to stay within the free
     Gemini tier, sleeping CALL_DELAY_SECONDS between calls.
     """
-    stats = {"processed": 0, "succeeded": 0, "failed": 0, "skipped": 0, "errors": []}
+    stats = {"processed": 0, "succeeded": 0, "failed": 0, "skipped": 0,
+             "quota_exceeded": False, "errors": []}
+    started_at = datetime.now(timezone.utc).isoformat()
+
+    # If the previous run hit the daily quota, don't even start — wait until a
+    # later run records a clean status (i.e. the quota has reset).
+    if _last_run_quota_exceeded():
+        log.warning("[GEMINI] Daily quota was exhausted on the last run — skipping this run.")
+        stats["quota_exceeded"] = True
+        return stats
+
+    # Transient 429s in the past left jobs stuck in 'failed'; give them another go.
+    reset_failed_jobs()
 
     # Fetch the requested number of pending jobs, then cap how many we actually
     # process this run so we don't blow through the free-tier rate limit.
@@ -245,6 +320,16 @@ def run_enrichment(limit=50):
             stats["succeeded"] += 1
             log.info(f"[GEMINI] Enriched job {job_id} — {str(job.get('title'))[:60]}")
         except Exception as e:
+            # A 429 means the daily quota is gone. Don't retry and don't fail the
+            # job — return it to pending, record the quota state, and stop.
+            if _is_rate_limit_error(e):
+                log.warning("[GEMINI] Daily quota reached, stopping enrichment.")
+                stats["processed"] -= 1  # this job never completed — back to pending
+                mark_job_pending(job_id)
+                _log_quota_exceeded(started_at, stats["succeeded"])
+                stats["quota_exceeded"] = True
+                break
+
             stats["failed"] += 1
             msg = f"job {job_id}: {str(e)[:200]}"
             stats["errors"].append(msg)

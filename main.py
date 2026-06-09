@@ -59,7 +59,8 @@ def root():
         "version": "1.1.0",
         "endpoints": ["/health", "/ingest", "/enrich", "/cleanup", "/status",
                       "/feeds/health", "/ask", "/search", "/trending",
-                      "/notify/test", "/notify/daily"]
+                      "/notify/test", "/notify/daily",
+                      "/report/daily", "/report/preview"]
     }), 200
 
 
@@ -533,6 +534,92 @@ def notify_daily():
         "sent": sent,
         "stats": stats,
     }), (200 if sent else 502)
+
+
+# ── Gmail intelligence report endpoints ──────────────────────
+@app.route("/report/daily", methods=["POST"])
+def report_daily():
+    """Auth-protected — generate the daily report, email it, and post a
+    Telegram summary.
+
+    The report is always generated (a "quiet day" report when there are no
+    items). Email and Telegram delivery are best-effort: a failure in either is
+    reported in the response but never raises.
+    """
+    if not verify_key(request):
+        log.warning("[REPORT] Unauthorized request blocked")
+        return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
+
+    date = None
+    if request.is_json and request.json:
+        date = request.json.get("date") or None
+
+    try:
+        from reporting.daily import generate_daily_report
+        report = generate_daily_report(date)
+    except Exception as e:
+        log.error(f"[REPORT] Daily report generation failed: {e}")
+        # Best-effort: alert via email so a silent failure doesn't go unnoticed.
+        try:
+            from notifier.gmail import send_error_alert
+            send_error_alert("report/daily", str(e))
+        except Exception:
+            pass
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    html_report = report["html"]
+    stats = report["stats"]
+
+    # ── Email delivery (never let a send failure crash the request) ──
+    email_sent = False
+    try:
+        from notifier.gmail import send_daily_report
+        email_sent = send_daily_report(html_report, stats)
+    except Exception as e:
+        log.error(f"[REPORT] Email send raised: {e}")
+
+    # ── Telegram summary (best-effort) ──
+    telegram_sent = False
+    try:
+        from notifier.telegram import send_daily_summary
+        telegram_sent = send_daily_summary({
+            "date": stats.get("date"),
+            "items_enriched": stats.get("total", 0),
+            "critical": stats.get("critical", 0),
+            "high": stats.get("high", 0),
+            "medium": stats.get("medium", 0),
+        })
+    except Exception as e:
+        log.error(f"[REPORT] Telegram summary raised: {e}")
+
+    return jsonify({
+        "status": "sent" if email_sent else "error",
+        "email_sent": email_sent,
+        "telegram_sent": telegram_sent,
+        "stats": stats,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }), (200 if email_sent else 502)
+
+
+@app.route("/report/preview", methods=["GET"])
+def report_preview():
+    """Auth-protected — return the raw daily report HTML for browser preview.
+
+    Accepts an optional ?date=YYYY-MM-DD query param (defaults to last 24h).
+    """
+    if not verify_key(request):
+        log.warning("[REPORT] Unauthorized request blocked")
+        return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
+
+    date = request.args.get("date") or None
+    try:
+        from reporting.daily import generate_daily_report
+        report = generate_daily_report(date)
+    except Exception as e:
+        log.error(f"[REPORT] Preview generation failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    return report["html"], 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
 # ── Entry point ──────────────────────────────────────────────

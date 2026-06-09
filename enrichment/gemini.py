@@ -14,7 +14,7 @@ import time
 import logging
 from datetime import datetime, timezone
 
-import google.generativeai as genai
+from google import genai
 
 from database.supabase_client import client
 
@@ -145,10 +145,8 @@ def call_gemini(prompt):
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set")
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(GEMINI_MODEL)
-
-    response = model.generate_content(prompt)
+    genai_client = genai.Client(api_key=api_key)
+    response = genai_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
 
     # Log token usage if available.
     try:

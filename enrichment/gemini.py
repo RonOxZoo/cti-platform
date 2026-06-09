@@ -212,6 +212,13 @@ def insert_intelligence_item(job, result):
     Upsert (ON CONFLICT raw_item_id) means a re-processed item updates its row
     in place instead of creating a duplicate. Requires a unique index on
     raw_item_id (see sql/fix_intelligence_items.sql).
+
+    RAG searchability: the `search_vector` tsvector (built from title_en,
+    summary_en, categories) is populated automatically by the BEFORE
+    INSERT/UPDATE trigger from sql/enable_fts.sql. That trigger fires on this
+    upsert, so every newly-enriched item becomes full-text searchable without
+    any extra client write — a tsvector can't be set correctly over PostgREST,
+    so the database side owns it. (Run sql/enable_fts.sql once to install it.)
     """
     payload = build_intelligence_payload(job, result)
     client.table("intelligence_items").upsert(payload, on_conflict="raw_item_id").execute()

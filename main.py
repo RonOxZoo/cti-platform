@@ -1,6 +1,8 @@
 import os
 import json
+import time
 import logging
+import threading
 import requests
 from flask import Flask, request, jsonify
 from datetime import datetime, timezone, timedelta
@@ -27,6 +29,27 @@ def verify_key(req) -> bool:
     return received == expected
 
 
+# ── Simple in-memory rate limiter ────────────────────────────
+# Process-local sliding-window limiter. Used to protect /ask against the free
+# Gemini tier (10 requests/minute). Single Render instance, so a per-process
+# window is sufficient.
+_rate_lock = threading.Lock()
+_rate_hits: dict = {}
+
+
+def rate_limited(bucket: str, max_calls: int, per_seconds: int = 60) -> bool:
+    """Return True if `bucket` has exceeded max_calls within per_seconds."""
+    now = time.time()
+    with _rate_lock:
+        hits = [t for t in _rate_hits.get(bucket, []) if now - t < per_seconds]
+        if len(hits) >= max_calls:
+            _rate_hits[bucket] = hits
+            return True
+        hits.append(now)
+        _rate_hits[bucket] = hits
+        return False
+
+
 # ── Routes ───────────────────────────────────────────────────
 @app.route("/", methods=["GET"])
 def root():
@@ -34,7 +57,8 @@ def root():
         "service": "CTI Platform",
         "status": "online",
         "version": "1.1.0",
-        "endpoints": ["/health", "/ingest", "/enrich", "/cleanup", "/status", "/feeds/health"]
+        "endpoints": ["/health", "/ingest", "/enrich", "/cleanup", "/status",
+                      "/feeds/health", "/ask", "/search", "/trending"]
     }), 200
 
 
@@ -325,6 +349,109 @@ def enrich():
         "timestamp": datetime.now(timezone.utc).isoformat(),
         **stats
     }), 200
+
+
+# ── RAG endpoints ────────────────────────────────────────────
+@app.route("/ask", methods=["POST"])
+def ask():
+    """Auth-protected RAG Q&A — answer a question grounded in our intelligence.
+
+    Rate-limited to 10 requests/minute (free Gemini tier).
+    """
+    if not verify_key(request):
+        log.warning("[ASK] Unauthorized request blocked")
+        return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
+
+    if rate_limited("ask", max_calls=10, per_seconds=60):
+        log.warning("[ASK] Rate limit exceeded (10/min)")
+        return jsonify({
+            "error": "Rate limit exceeded",
+            "hint": "Maximum 10 requests per minute",
+        }), 429
+
+    body = request.json if request.is_json else None
+    question = (body or {}).get("question", "").strip()
+    if not question:
+        return jsonify({"error": "Missing 'question' in request body"}), 400
+
+    log.info(f"[ASK] Question: {question[:120]}")
+    try:
+        from rag.gemini_rag import ask_intelligence
+        result = ask_intelligence(question)
+    except Exception as e:
+        log.error(f"[ASK] ask_intelligence failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    return jsonify(result), 200
+
+
+@app.route("/search", methods=["POST"])
+def search_endpoint():
+    """Auth-protected — typed search over collected intelligence.
+
+    Body: {"query": "...", "type": "text|ioc|actor|cve", "limit": 10}
+    """
+    if not verify_key(request):
+        log.warning("[SEARCH] Unauthorized request blocked")
+        return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
+
+    body = request.json if request.is_json else None
+    body = body or {}
+    query = str(body.get("query", "")).strip()
+    search_type = str(body.get("type", "text")).strip().lower()
+    if not query:
+        return jsonify({"error": "Missing 'query' in request body"}), 400
+
+    try:
+        limit = int(body.get("limit", 10))
+    except (TypeError, ValueError):
+        limit = 10
+    limit = max(1, min(limit, 50))
+
+    log.info(f"[SEARCH] type={search_type} query={query[:100]} limit={limit}")
+    try:
+        from rag import search as rag_search
+        if search_type == "ioc":
+            results = rag_search.search_by_ioc(query)[:limit]
+        elif search_type == "actor":
+            results = rag_search.search_by_actor(query)[:limit]
+        elif search_type == "cve":
+            results = rag_search.search_by_cve(query)[:limit]
+        elif search_type == "text":
+            results = rag_search.search_intelligence(query, limit=limit)
+        else:
+            return jsonify({"error": f"Unknown type '{search_type}'",
+                            "hint": "type must be text|ioc|actor|cve"}), 400
+    except Exception as e:
+        log.error(f"[SEARCH] search failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    return jsonify({
+        "type": search_type,
+        "query": query,
+        "count": len(results),
+        "results": results,
+    }), 200
+
+
+@app.route("/trending", methods=["GET"])
+def trending():
+    """Public dashboard endpoint — trending IOCs, actors, and CVEs (last 7 days)."""
+    try:
+        from rag import search as rag_search
+        days = 7
+        payload = {
+            "window_days": days,
+            "trending_iocs": rag_search.get_trending_iocs(days=days),
+            "top_actors": rag_search.get_trending_actors(days=days),
+            "top_cves": rag_search.get_trending_cves(days=days),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        log.error(f"[TRENDING] failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+    return jsonify(payload), 200
 
 
 # ── Entry point ──────────────────────────────────────────────

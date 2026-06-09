@@ -25,52 +25,136 @@ log = logging.getLogger(__name__)
 GEMINI_MODEL = "gemini-2.0-flash"
 
 # Free-tier rate-limit protection.
+# Free tier ≈ 1500 req/day ≈ 1/min, so 15 items/run with a 5s gap is a safe
+# batch size that won't blow the per-minute or daily budget in one run.
 CALL_DELAY_SECONDS = 5        # delay between consecutive Gemini calls
-MAX_ITEMS_PER_RUN = 3         # hard cap on items processed per /enrich call
+MAX_ITEMS_PER_RUN = 15        # hard cap on items processed per /enrich call
 
 # ingestion_logs scenario name used to record enrichment quota state. Kept
 # distinct from the RSS scenario so RSS runs don't overwrite the quota marker.
 ENRICHMENT_SCENARIO = "python_gemini_enrichment"
 
-SYSTEM_INSTRUCTION = """ROLE: You are a Cyber Threat Intelligence analyst-agent for an OSINT platform.
-You process ONLY lawfully-obtained, publicly-published sources.
+SYSTEM_PROMPT = """
+ROLE: You are a senior Cyber Threat Intelligence analyst working for
+an Israeli cybersecurity operations center. You analyze threat intelligence
+from global sources with special focus on:
+- Israeli cyber ecosystem and targets
+- Iran-Israel cyber conflict
+- APT groups targeting Middle East
+- Critical infrastructure threats
+- Global ransomware and phishing campaigns
 
-INPUT: One feed item with source_name, raw_title, raw_body.
+INPUT: A raw intelligence item with title and content.
 
-STEP 1 — EXTRACTION:
-Extract: IPs, domains, hashes (MD5/SHA1/SHA256), URLs, emails, CVE IDs, threat-actor names, MITRE ATT&CK techniques (TXXXX).
-Categorize: Global | Israel | Iran | Russia | China | Phishing | CVE | Infrastructure | APT.
+YOUR TASK: Produce a comprehensive structured intelligence assessment.
 
-STEP 2 — SEVERITY (justify in one sentence):
-Critical = global impact / critical infra / zero-day
-High = active campaign / known APT / sensitive data
-Medium = known vuln / targeted phishing
-Low = background / research / first disclosure
+STEP 1 — FULL EXTRACTION:
+Extract ALL of the following if present:
+- IP addresses (IPv4 and IPv6)
+- Domain names and subdomains
+- URLs (full paths)
+- Email addresses
+- File hashes (MD5, SHA1, SHA256) — preserve exact format
+- CVE identifiers (CVE-XXXX-XXXXX format)
+- Threat actor / APT group names and aliases
+- MITRE ATT&CK technique IDs (TXXXX or TXXXX.XXX)
+- Campaign names or operation names
+- Targeted sectors (healthcare, finance, energy, government, defense, telecom)
+- Targeted countries or regions
+- Malware family names
+- C2 infrastructure indicators
 
-STEP 3 — CONFIDENCE (0-100): state what reduced confidence and what data would raise it.
+STEP 2 — DEEP CATEGORIZATION:
+Primary category (pick ONE most relevant):
+global_ti, apt, israel, iran_nexus, phishing, cves, ics, research
 
-STEP 4 — SUMMARY:
-Write a professional 3-5 sentence intelligence summary in English.
-Then write the same summary in Hebrew. Label it [HEBREW SUMMARY].
-Use correct Hebrew cybersecurity terminology.
+Secondary tags (pick ALL that apply):
+ransomware, espionage, data_breach, zero_day, supply_chain,
+critical_infrastructure, financial, healthcare, government,
+defense, telecom, energy, middle_east, nation_state, criminal
 
-OUTPUT: Return ONLY valid JSON with these fields:
+STEP 3 — SEVERITY ASSESSMENT:
+Rate severity with detailed justification:
+- CRITICAL: Active exploitation, zero-day, critical infrastructure attack,
+  mass impact, Israeli target under active attack
+- HIGH: Nation-state campaign, known APT active, sensitive sector targeted,
+  high CVSS score (8.0+), Israeli/Iranian nexus
+- MEDIUM: Known vulnerability, targeted phishing, criminal campaign,
+  medium CVSS (4.0-7.9)
+- LOW: Research disclosure, patched vulnerability, historical analysis,
+  low CVSS (<4.0)
+
+STEP 4 — CONFIDENCE SCORING (0-100):
+Score based on:
+- Source reputation (known vendor = higher)
+- IOC specificity (specific hashes/IPs = higher)
+- Attribution confidence (named APT with evidence = higher)
+- Corroboration (multiple sources = higher)
+State exactly what would increase confidence.
+
+STEP 5 — ISRAEL/IRAN RELEVANCE:
+israel_relevance = true if:
+- Israeli organization targeted or mentioned
+- Israeli threat actor mentioned
+- INCD/Israeli CERT advisory
+- Impact on Israeli infrastructure or citizens
+
+iran_nexus = true if:
+- Iranian APT (APT33, APT34, APT35, Charming Kitten, etc.)
+- Iranian government or IRGC linked
+- Iran-Israel cyber conflict context
+- Iranian infrastructure mentioned
+
+STEP 6 — PROFESSIONAL SUMMARIES:
+Write a 5-7 sentence professional intelligence summary in English.
+Cover: what happened, who is involved, what was targeted,
+what TTPs were used, what the impact/risk is, what defenders should do.
+
+Then write the SAME summary in professional Hebrew.
+Use correct Hebrew cybersecurity terminology:
+- גורם איום (threat actor)
+- פרצת אבטחה (vulnerability)
+- תוכנת כופר (ransomware)
+- תקיפת סייבר (cyber attack)
+- מודיעין איומים (threat intelligence)
+- תשתית קריטית (critical infrastructure)
+- קמפיין תקיפה (attack campaign)
+- סממן פשרה (IOC - indicator of compromise)
+
+STEP 7 — CONTRADICTION CHECK:
+Note if this conflicts with any common knowledge about the actor/CVE.
+
+OUTPUT FORMAT:
+Return ONLY valid JSON. No preamble. No markdown fences. No explanation.
 {
-  "category": "",
-  "severity": "",
-  "severity_reason": "",
-  "confidence": 0,
-  "confidence_reason": "",
-  "iocs": {"ips": [], "domains": [], "urls": [], "hashes": [], "emails": []},
+  "category": "global_ti|apt|israel|iran_nexus|phishing|cves|ics|research",
+  "tags": ["tag1", "tag2"],
+  "severity": "critical|high|medium|low",
+  "severity_reason": "one detailed sentence",
+  "confidence": 0-100,
+  "confidence_reason": "explanation of score and what would raise it",
+  "iocs": {
+    "ips": [],
+    "domains": [],
+    "urls": [],
+    "hashes": {"md5": [], "sha1": [], "sha256": []},
+    "emails": [],
+    "malware_families": [],
+    "c2_servers": []
+  },
   "cves": [],
   "actors": [],
-  "mitre": [],
-  "summary_en": "",
-  "summary_he": "",
+  "mitre_techniques": [],
+  "targeted_sectors": [],
+  "targeted_countries": [],
+  "campaign_name": null,
+  "summary_en": "5-7 sentence professional summary",
+  "summary_he": "5-7 sentence Hebrew summary",
   "israel_relevance": false,
-  "iran_nexus": false
+  "iran_nexus": false,
+  "contradiction_note": null
 }
-No preamble. No markdown. Pure JSON only."""
+"""
 
 
 def get_pending_jobs(limit=50):
@@ -101,10 +185,87 @@ def get_pending_jobs(limit=50):
     return jobs
 
 
+# ── Priority queue ───────────────────────────────────────────
+# Lower rank = processed first. Severity (from any prior enrichment) dominates;
+# source category breaks ties so high-value feeds go first on a cold queue.
+_SEVERITY_PRIORITY = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+_CATEGORY_PRIORITY = {
+    "iran_nexus": 0, "israel": 0, "apt": 1, "ics": 1,
+    "cves": 2, "phishing": 3, "global_ti": 4, "research": 5,
+}
+
+
+def _existing_severities(raw_item_ids: list) -> dict:
+    """Map raw_item_id -> prior severity (lowercased) from intelligence_items.
+
+    Used to prioritise re-enrichment: items previously scored critical/high are
+    processed first. Best-effort — returns {} on error.
+    """
+    out = {}
+    ids = [r for r in raw_item_ids if r]
+    if not ids:
+        return out
+    try:
+        result = (
+            client.table("intelligence_items")
+            .select("raw_item_id, severity")
+            .in_("raw_item_id", ids)
+            .execute()
+        )
+        for row in (result.data or []):
+            sev = (row.get("severity") or "").strip().lower()
+            if sev:
+                out[row.get("raw_item_id")] = sev
+    except Exception as e:
+        log.error(f"[GEMINI] _existing_severities failed: {e}")
+    return out
+
+
+def _source_categories(source_ids: list) -> dict:
+    """Map source_id -> rss_sources.category. Best-effort — returns {} on error."""
+    out = {}
+    ids = list({s for s in source_ids if s})
+    if not ids:
+        return out
+    try:
+        result = (
+            client.table("rss_sources")
+            .select("id, category")
+            .in_("id", ids)
+            .execute()
+        )
+        for row in (result.data or []):
+            out[row.get("id")] = (row.get("category") or "").strip().lower()
+    except Exception as e:
+        log.error(f"[GEMINI] _source_categories failed: {e}")
+    return out
+
+
+def prioritize_jobs(jobs: list) -> list:
+    """Order pending jobs so CRITICAL/HIGH (and high-value sources) go first.
+
+    Severity is taken from any prior enrichment of the same raw_item (the common
+    case after a re-enrichment reset); source category is the tiebreaker for
+    items that have never been scored. Stable sort preserves DB order within a
+    rank.
+    """
+    if len(jobs) <= 1:
+        return jobs
+    sev_map = _existing_severities([j.get("raw_item_id") for j in jobs])
+    cat_map = _source_categories([j.get("source_id") for j in jobs])
+
+    def rank(job):
+        sev = sev_map.get(job.get("raw_item_id"))
+        cat = cat_map.get(job.get("source_id"))
+        return (_SEVERITY_PRIORITY.get(sev, 9), _CATEGORY_PRIORITY.get(cat, 9))
+
+    return sorted(jobs, key=rank)
+
+
 def build_prompt(title, raw_content):
     """Build the full prompt string for a single feed item."""
     return (
-        f"{SYSTEM_INSTRUCTION}\n\n"
+        f"{SYSTEM_PROMPT}\n\n"
         f"raw_title: {title or ''}\n"
         f"raw_body: {raw_content or ''}\n"
     )
@@ -172,39 +333,96 @@ def call_gemini(prompt):
         raise RuntimeError(f"Failed to parse Gemini JSON: {e}; raw={cleaned[:300]}")
 
 
+def call_gemini_with_retry(prompt):
+    """Call Gemini, retrying ONCE on a transient (non-quota) failure.
+
+    A 429 / quota error is re-raised immediately and never retried — the caller
+    stops the run to preserve the remaining daily quota. Any other error (e.g. a
+    malformed-JSON response or a blip) gets a single retry after the standard
+    inter-call delay before being allowed to propagate.
+    """
+    try:
+        return call_gemini(prompt)
+    except Exception as e:
+        if _is_rate_limit_error(e):
+            raise  # quota errors must not be retried
+        log.warning(f"[GEMINI] Call failed, retrying once: {str(e)[:160]}")
+        time.sleep(CALL_DELAY_SECONDS)
+        return call_gemini(prompt)
+
+
+# Columns added by sql/add_tags_column.sql. They are mapped from the richer
+# Gemini output, but if that migration hasn't been applied yet an upsert that
+# includes them fails wholesale (PostgREST PGRST204). To avoid the historical
+# "table stays empty" failure mode, insert_intelligence_item retries without
+# these columns and logs a clear pointer to the migration.
+_OPTIONAL_COLUMNS = ("tags", "targeted_sectors", "targeted_countries",
+                     "campaign_name", "malware_families")
+
+
 def build_intelligence_payload(job, result):
     """Map Gemini's JSON output onto the real intelligence_items columns.
 
-    IOCs/CVEs/actors/MITRE are consolidated into the `enrichment_data` jsonb
-    column; the rest map to dedicated typed columns.
+    The richer structured output (full IOC buckets, CVEs, actors, MITRE,
+    malware families, C2 servers, contradiction note) is consolidated into the
+    `enrichment_data` jsonb column; the flat fields map to dedicated typed
+    columns (some added by sql/add_tags_column.sql).
     """
     category = (result.get("category") or "").strip()
     try:
         confidence = int(result.get("confidence"))
     except (TypeError, ValueError):
         confidence = None
+
+    iocs = result.get("iocs", {}) or {}
+    # malware_families is nested under iocs in the Gemini schema; surface it both
+    # in enrichment_data and in its own typed column.
+    malware_families = iocs.get("malware_families", []) or []
+
     return {
         "raw_item_id": job["raw_item_id"],
         "severity": result.get("severity"),
         "severity_rationale": result.get("severity_reason"),
         "confidence_score": confidence,
         "confidence_rationale": result.get("confidence_reason"),
-        # categories is a text[] — wrap the single Gemini category.
+        # categories is a text[] — wrap the single Gemini primary category.
         "categories": [category] if category else [],
+        # New typed columns (sql/add_tags_column.sql).
+        "tags": result.get("tags", []) or [],
+        "targeted_sectors": result.get("targeted_sectors", []) or [],
+        "targeted_countries": result.get("targeted_countries", []) or [],
+        "campaign_name": result.get("campaign_name") or None,
+        "malware_families": malware_families,
         "summary_en": result.get("summary_en"),
         "summary_he": result.get("summary_he"),
         "israel_relevance": bool(result.get("israel_relevance", False)),
         "iran_nexus": bool(result.get("iran_nexus", False)),
-        # All IOC-style structured output lives in the jsonb column.
+        # All IOC-style structured output lives in the jsonb column. The key
+        # names here (iocs/cves/actors/mitre) are the contract the RAG search
+        # and report generators read from — keep them stable.
         "enrichment_data": {
-            "iocs": result.get("iocs", {}),
+            "iocs": iocs,
             "cves": result.get("cves", []),
             "actors": result.get("actors", []),
-            "mitre": result.get("mitre", []),
+            "mitre": result.get("mitre_techniques", []),
+            "malware_families": malware_families,
+            "c2_servers": iocs.get("c2_servers", []),
+            "contradiction_note": result.get("contradiction_note"),
         },
         "gemini_processed": True,
         "processed_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _is_missing_column_error(err) -> bool:
+    """True if an error looks like writing to a column that doesn't exist yet."""
+    text = str(err).lower()
+    return (
+        "pgrst204" in text
+        or ("column" in text and ("does not exist" in text
+                                  or "could not find" in text
+                                  or "schema cache" in text))
+    )
 
 
 def insert_intelligence_item(job, result):
@@ -214,6 +432,10 @@ def insert_intelligence_item(job, result):
     in place instead of creating a duplicate. Requires a unique index on
     raw_item_id (see sql/fix_intelligence_items.sql).
 
+    If the sql/add_tags_column.sql migration hasn't been applied, the upsert is
+    retried without the new columns so enrichment still works (degraded) rather
+    than failing every item.
+
     RAG searchability: the `search_vector` tsvector (built from title_en,
     summary_en, categories) is populated automatically by the BEFORE
     INSERT/UPDATE trigger from sql/enable_fts.sql. That trigger fires on this
@@ -222,7 +444,19 @@ def insert_intelligence_item(job, result):
     so the database side owns it. (Run sql/enable_fts.sql once to install it.)
     """
     payload = build_intelligence_payload(job, result)
-    client.table("intelligence_items").upsert(payload, on_conflict="raw_item_id").execute()
+    try:
+        client.table("intelligence_items").upsert(payload, on_conflict="raw_item_id").execute()
+    except Exception as e:
+        if _is_missing_column_error(e):
+            log.warning(
+                "[GEMINI] intelligence_items is missing the new columns — run "
+                "sql/add_tags_column.sql in Supabase. Upserting without "
+                f"{', '.join(_OPTIONAL_COLUMNS)} for now."
+            )
+            reduced = {k: v for k, v in payload.items() if k not in _OPTIONAL_COLUMNS}
+            client.table("intelligence_items").upsert(reduced, on_conflict="raw_item_id").execute()
+        else:
+            raise
 
 
 def update_job_status(job_id, status, error=None):
@@ -315,7 +549,7 @@ def _build_alert_item(job, result):
         "category": result.get("category"),
         "actors": result.get("actors", []),
         "cves": result.get("cves", []),
-        "mitre": result.get("mitre", []),
+        "mitre": result.get("mitre_techniques", []),
         # Flatten hashes so the alert can render them inside <code> blocks.
         "iocs": iocs,
         "summary_en": result.get("summary_en"),
@@ -361,14 +595,16 @@ def run_enrichment(limit=50):
     # Transient 429s in the past left jobs stuck in 'failed'; give them another go.
     reset_failed_jobs()
 
-    # Fetch the requested number of pending jobs, then cap how many we actually
-    # process this run so we don't blow through the free-tier rate limit.
+    # Fetch the requested number of pending jobs, order them by priority
+    # (CRITICAL/HIGH and high-value sources first), then cap how many we
+    # actually process this run so we don't blow through the free-tier limit.
     fetched = get_pending_jobs(limit=limit)
-    jobs = fetched[:MAX_ITEMS_PER_RUN]
+    ordered = prioritize_jobs(fetched)
+    jobs = ordered[:MAX_ITEMS_PER_RUN]
     stats["skipped"] = len(fetched) - len(jobs)
     log.info(
         f"[GEMINI] {len(fetched)} pending jobs fetched — processing {len(jobs)} "
-        f"(cap={MAX_ITEMS_PER_RUN}), skipping {stats['skipped']} for next run"
+        f"by priority (cap={MAX_ITEMS_PER_RUN}), skipping {stats['skipped']} for next run"
     )
 
     for i, job in enumerate(jobs):
@@ -380,7 +616,7 @@ def run_enrichment(limit=50):
         job_id = job.get("job_id")
         try:
             prompt = build_prompt(job["title"], job["raw_content"])
-            result = call_gemini(prompt)
+            result = call_gemini_with_retry(prompt)
             insert_intelligence_item(job, result)
             update_job_status(job_id, "done")
             stats["succeeded"] += 1

@@ -79,21 +79,36 @@ def _source_of(item: dict) -> str:
     )
 
 
+# Buckets inside enrichment_data['iocs'] that are not network/host indicators
+# and so are excluded from the IOC summary table (malware_families has its own
+# typed column and rendering).
+_IOC_SKIP_BUCKETS = {"malware_families"}
+
+
 def _iter_ioc_pairs(iocs: dict):
     """Yield (type, value) for every IOC in an enrichment_data['iocs'] dict.
 
-    Shape: {"ips": [], "domains": [], "urls": [], "hashes": [], "emails": []}.
-    The bucket name (minus a trailing 's') is used as the IOC type label.
+    Handles both the flat buckets (ips/domains/urls/emails/c2_servers) and the
+    nested hashes bucket ({"md5": [], "sha1": [], "sha256": []}). The bucket
+    name (minus a trailing 's') is used as the IOC type label.
     """
     if not isinstance(iocs, dict):
         return
     for bucket, values in iocs.items():
-        if not isinstance(values, list):
+        if bucket in _IOC_SKIP_BUCKETS:
             continue
-        label = str(bucket).rstrip("s") or str(bucket)
-        for v in values:
-            if v:
-                yield label, str(v)
+        if isinstance(values, dict):
+            # Nested bucket, e.g. hashes -> {md5: [...], sha1: [...], ...}.
+            for sub, subvals in values.items():
+                if isinstance(subvals, list):
+                    for v in subvals:
+                        if v:
+                            yield str(sub), str(v)
+        elif isinstance(values, list):
+            label = str(bucket).rstrip("s") or str(bucket)
+            for v in values:
+                if v:
+                    yield label, str(v)
 
 
 def _day_bounds(date: str = None):

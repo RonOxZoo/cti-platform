@@ -183,7 +183,8 @@ def _fetch_enriched(limit: int = _INDICATOR_SCAN_LIMIT) -> list:
 def _iter_ioc_values(iocs: dict):
     """Yield every IOC value from an enrichment_data['iocs'] dict.
 
-    Shape: {"ips": [], "domains": [], "urls": [], "hashes": [], "emails": []}.
+    Handles flat buckets (ips/domains/urls/emails/c2_servers/malware_families)
+    and the nested hashes bucket ({"md5": [], "sha1": [], "sha256": []}).
     """
     if not isinstance(iocs, dict):
         return
@@ -192,6 +193,13 @@ def _iter_ioc_values(iocs: dict):
             for v in bucket:
                 if v:
                     yield str(v)
+        elif isinstance(bucket, dict):
+            # Nested bucket, e.g. hashes -> {md5: [...], sha1: [...], ...}.
+            for subvals in bucket.values():
+                if isinstance(subvals, list):
+                    for v in subvals:
+                        if v:
+                            yield str(v)
 
 
 def search_by_ioc(ioc_value: str) -> list:

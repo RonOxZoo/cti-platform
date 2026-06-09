@@ -1,10 +1,15 @@
 """
 Gemini AI enrichment — processes pending jobs from processing_jobs table.
-Sends raw_items content to Gemini 1.5 Flash, parses the JSON response,
+Sends raw_items content to Gemini 2.0 Flash, parses the JSON response,
 and inserts results into intelligence_items table.
+
+Tuned for the FREE Gemini API tier: a fixed delay between calls, a single
+retry with back-off on 429 rate-limit errors, and a hard cap on the number
+of items processed per run.
 """
 import os
 import json
+import time
 import logging
 from datetime import datetime, timezone
 
@@ -14,7 +19,13 @@ from database.supabase_client import client
 
 log = logging.getLogger(__name__)
 
-GEMINI_MODEL = "gemini-1.5-flash"
+# Free-tier-friendly model.
+GEMINI_MODEL = "gemini-2.0-flash"
+
+# Free-tier rate-limit protection.
+CALL_DELAY_SECONDS = 2        # delay between consecutive Gemini calls
+RATE_LIMIT_BACKOFF = 60       # wait this long after a 429 before retrying
+MAX_ITEMS_PER_RUN = 10        # hard cap on items processed per /enrich call
 
 SYSTEM_INSTRUCTION = """ROLE: You are a Cyber Threat Intelligence analyst-agent for an OSINT platform.
 You process ONLY lawfully-obtained, publicly-published sources.
@@ -108,15 +119,41 @@ def _strip_code_fences(text: str) -> str:
     return t
 
 
+def _is_rate_limit_error(err) -> bool:
+    """Detect a 429 / quota-exhausted error without depending on a specific
+    exception class (the genai stack raises several)."""
+    text = str(err).lower()
+    return (
+        "429" in text
+        or ("resource" in text and "exhaust" in text)
+        or "rate limit" in text
+        or "quota" in text
+    )
+
+
 def call_gemini(prompt):
-    """Call Gemini and return the parsed JSON dict. Raises on failure."""
+    """Call Gemini and return the parsed JSON dict. Raises on failure.
+
+    On a 429 rate-limit error, waits RATE_LIMIT_BACKOFF seconds and retries once.
+    """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set")
 
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(GEMINI_MODEL)
-    response = model.generate_content(prompt)
+
+    try:
+        response = model.generate_content(prompt)
+    except Exception as e:
+        if _is_rate_limit_error(e):
+            log.warning(
+                f"[GEMINI] Rate limit (429) hit — waiting {RATE_LIMIT_BACKOFF}s before one retry"
+            )
+            time.sleep(RATE_LIMIT_BACKOFF)
+            response = model.generate_content(prompt)
+        else:
+            raise
 
     # Log token usage if available.
     try:
@@ -176,12 +213,28 @@ def update_job_status(job_id, status, error=None):
 
 
 def run_enrichment(limit=50):
-    """Main orchestrator — enrich pending jobs one by one."""
-    stats = {"processed": 0, "succeeded": 0, "failed": 0, "errors": []}
-    jobs = get_pending_jobs(limit=limit)
-    log.info(f"[GEMINI] {len(jobs)} pending jobs to enrich")
+    """Main orchestrator — enrich pending jobs one by one.
 
-    for job in jobs:
+    Processes at most MAX_ITEMS_PER_RUN items per call to stay within the free
+    Gemini tier, sleeping CALL_DELAY_SECONDS between calls.
+    """
+    stats = {"processed": 0, "succeeded": 0, "failed": 0, "skipped": 0, "errors": []}
+
+    # Fetch the requested number of pending jobs, then cap how many we actually
+    # process this run so we don't blow through the free-tier rate limit.
+    fetched = get_pending_jobs(limit=limit)
+    jobs = fetched[:MAX_ITEMS_PER_RUN]
+    stats["skipped"] = len(fetched) - len(jobs)
+    log.info(
+        f"[GEMINI] {len(fetched)} pending jobs fetched — processing {len(jobs)} "
+        f"(cap={MAX_ITEMS_PER_RUN}), skipping {stats['skipped']} for next run"
+    )
+
+    for i, job in enumerate(jobs):
+        # Throttle between calls (not before the first one).
+        if i > 0:
+            time.sleep(CALL_DELAY_SECONDS)
+
         stats["processed"] += 1
         job_id = job.get("job_id")
         try:
@@ -201,7 +254,8 @@ def run_enrichment(limit=50):
 
     log.info(
         f"[GEMINI] Enrichment complete — processed={stats['processed']} "
-        f"succeeded={stats['succeeded']} failed={stats['failed']}"
+        f"succeeded={stats['succeeded']} failed={stats['failed']} "
+        f"skipped={stats['skipped']}"
     )
     return stats
 
@@ -217,5 +271,6 @@ if __name__ == "__main__":
     print(f"  processed : {result_stats['processed']}")
     print(f"  succeeded : {result_stats['succeeded']}")
     print(f"  failed    : {result_stats['failed']}")
+    print(f"  skipped   : {result_stats['skipped']}")
     for err in result_stats["errors"]:
         print(f"  error: {err}")

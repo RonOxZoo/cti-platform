@@ -1,6 +1,6 @@
 {
   "tool": "CTI Platform Health Check",
-  "generated_at": "2026-06-08T19:27:35.539609+00:00",
+  "generated_at": "2026-06-08T19:42:59.684386+00:00",
   "checks": {
     "supabase": {
       "status": "ok",
@@ -31,13 +31,13 @@
             "title_preview": "Disrupting Glassworm: Inside CrowdStrike&rsquo;s Takedown of a Developer-Targeting Botnet",
             "issues": {
               "title": [
-                "developer-targeting",
                 "takedown",
+                "developer-targeting",
                 "glassworm"
               ],
               "content": [
-                "developer-targeting",
                 "takedown",
+                "developer-targeting",
                 "glassworm"
               ]
             }
@@ -61,12 +61,12 @@
             "title_preview": "CrowdStrike Scales AI-Native Agents Across Falcon Exposure Management with NVIDIA",
             "issues": {
               "title": [
-                "ai-native",
-                "nvidia"
+                "nvidia",
+                "ai-native"
               ],
               "content": [
-                "ai-native",
-                "nvidia"
+                "nvidia",
+                "ai-native"
               ]
             }
           },
@@ -75,14 +75,14 @@
             "title_preview": "CrowdStrike Brings Enterprise-Grade Security to the AI Factory with NVIDIA Vera BlueField-",
             "issues": {
               "title": [
-                "stx",
                 "nvidia",
-                "enterprise-grade"
+                "enterprise-grade",
+                "stx"
               ],
               "content": [
-                "stx",
                 "nvidia",
-                "enterprise-grade"
+                "enterprise-grade",
+                "stx"
               ]
             }
           },
@@ -127,13 +127,13 @@
             "title_preview": "Disrupting Glassworm: Inside CrowdStrike&rsquo;s Takedown of a Developer-Targeting Botnet",
             "issues": {
               "title": [
-                "developer-targeting",
                 "takedown",
+                "developer-targeting",
                 "glassworm"
               ],
               "content": [
-                "developer-targeting",
                 "takedown",
+                "developer-targeting",
                 "glassworm"
               ]
             }
@@ -157,12 +157,12 @@
             "title_preview": "CrowdStrike Scales AI-Native Agents Across Falcon Exposure Management with NVIDIA",
             "issues": {
               "title": [
-                "ai-native",
-                "nvidia"
+                "nvidia",
+                "ai-native"
               ],
               "content": [
-                "ai-native",
-                "nvidia"
+                "nvidia",
+                "ai-native"
               ]
             }
           },
@@ -171,14 +171,14 @@
             "title_preview": "CrowdStrike Brings Enterprise-Grade Security to the AI Factory with NVIDIA Vera BlueField-",
             "issues": {
               "title": [
-                "stx",
                 "nvidia",
-                "enterprise-grade"
+                "enterprise-grade",
+                "stx"
               ],
               "content": [
-                "stx",
                 "nvidia",
-                "enterprise-grade"
+                "enterprise-grade",
+                "stx"
               ]
             }
           },
@@ -242,8 +242,8 @@
             "title_preview": "Oxford University discloses data breach after careers platform hack",
             "issues": {
               "content": [
-                "third-party",
-                "gti"
+                "gti",
+                "third-party"
               ]
             }
           },
@@ -255,10 +255,10 @@
                 "password-stealing"
               ],
               "content": [
+                "autofill",
+                "loader\u201d",
+                "usernames",
                 "\u201cfree\u201d",
-                "open-source",
-                "ren\u2019py",
-                "story-driven",
                 "backdoor.xworm"
               ]
             }
@@ -269,8 +269,8 @@
             "issues": {
               "content": [
                 "post-authentication",
-                "qilin",
-                "post-compromise"
+                "post-compromise",
+                "qilin"
               ]
             }
           },
@@ -282,9 +282,9 @@
                 "owasp"
               ],
               "content": [
+                "fogel",
                 "\u201cunresolved",
                 "problem\u201d",
-                "fogel",
                 "owasp\u2019s"
               ]
             }
@@ -298,11 +298,11 @@
                 "bsd"
               ],
               "content": [
-                "china-nexus",
-                "bsd",
-                "cyber",
+                "plenet",
+                "grimbolt",
                 "agentpsd",
-                "volexity"
+                "volexity",
+                "bsd"
               ]
             }
           },
@@ -311,11 +311,11 @@
             "title_preview": "The AI security race needs accountability, not overregulation",
             "issues": {
               "content": [
+                "u.s",
+                "u.s.-based",
+                "heavy-handed",
                 "anthropic\u2019s",
-                "model\u2019s",
-                "long-term",
-                "house\u2019s",
-                "well-intentioned"
+                "long-term"
               ]
             }
           },
@@ -334,9 +334,9 @@
             "title_preview": "Infosecurity Europe: How DSIT Protects Thousands of UK Orgs from Cyber Vulnerabilities",
             "issues": {
               "title": [
+                "dsit",
                 "orgs",
-                "cyber",
-                "dsit"
+                "cyber"
               ],
               "content": [
                 "hands-on"
@@ -363,8 +363,8 @@
                 "u.s"
               ],
               "content": [
-                "gtig",
-                "u.s"
+                "u.s",
+                "gtig"
               ]
             }
           },
@@ -373,11 +373,11 @@
             "title_preview": "A week in security (June 1 &#8211; June 7)",
             "issues": {
               "content": [
+                "go-to",
+                "logins",
                 "infostealers",
-                "instagram",
-                "&nbsp",
-                "meta\u2019s",
-                "bot"
+                "bot",
+                "fake-invoice"
               ]
             }
           },
@@ -390,9 +390,9 @@
               ],
               "content": [
                 "ide",
+                "auto-updated",
                 "two-hour",
-                "\"when",
-                "auto-updated"
+                "\"when"
               ]
             }
           },
@@ -404,9 +404,9 @@
                 "instagram"
               ],
               "content": [
-                "instagram",
+                "meta's",
                 "ai-powered",
-                "meta's"
+                "instagram"
               ]
             }
           },
@@ -440,9 +440,9 @@
                 "ai-powered"
               ],
               "content": [
-                "open-source",
+                "\"intelligent",
                 "terminal,\"",
-                "\"intelligent"
+                "open-source"
               ]
             }
           },
@@ -454,9 +454,9 @@
                 "dd-wrt"
               ],
               "content": [
+                "cpu",
                 "dd-wrt",
-                "gafgyt",
-                "cpu"
+                "gafgyt"
               ]
             }
           },
@@ -478,15 +478,15 @@
       "checks": {
         "root": {
           "status": 404,
-          "latency_ms": 953
+          "latency_ms": 1000
         },
         "health": {
           "status": 404,
-          "latency_ms": 516
+          "latency_ms": 593
         },
         "ingest_auth_probe": {
           "status": 404,
-          "latency_ms": 438
+          "latency_ms": 563
         },
         "status": {
           "status": 404,
@@ -504,18 +504,18 @@
           "trust_score": 0.9,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 391,
+          "latency_ms": 407,
           "entry_count": 10,
           "feed_title": "Check Point Blog",
           "bozo": false,
           "warnings": []
         },
         {
-          "name": "CISA Alerts",
-          "url": "https://www.cisa.gov/news.xml",
-          "category": "global_ti",
-          "trust_score": 0.95,
-          "status": "http_403"
+          "name": "Google TAG",
+          "url": "https://blog.google/threat-analysis-group/rss/",
+          "category": "research",
+          "trust_score": 0.92,
+          "status": "http_404"
         },
         {
           "name": "SANS ISC",
@@ -524,18 +524,18 @@
           "trust_score": 0.88,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 1344,
+          "latency_ms": 1594,
           "entry_count": 10,
           "feed_title": "SANS Internet Storm Center, InfoCON: green",
           "bozo": false,
           "warnings": []
         },
         {
-          "name": "Cisco Talos",
-          "url": "https://blog.talosintelligence.com/feeds/posts/default",
-          "category": "global_ti",
-          "trust_score": 0.9,
-          "status": "http_404"
+          "name": "Secureworks CTU",
+          "url": "https://www.secureworks.com/blog/rss",
+          "category": "apt",
+          "trust_score": 0.88,
+          "status": "timeout"
         },
         {
           "name": "SentinelOne",
@@ -544,7 +544,7 @@
           "trust_score": 0.85,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 422,
+          "latency_ms": 640,
           "entry_count": 10,
           "feed_title": "Cybersecurity Blog | SentinelOne",
           "bozo": false,
@@ -557,7 +557,7 @@
           "trust_score": 0.88,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 688,
+          "latency_ms": 437,
           "entry_count": 100,
           "feed_title": "WeLiveSecurity",
           "bozo": false,
@@ -570,7 +570,7 @@
           "trust_score": 0.87,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 1125,
+          "latency_ms": 1156,
           "entry_count": 10,
           "feed_title": "Securelist",
           "bozo": false,
@@ -583,7 +583,7 @@
           "trust_score": 0.8,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 1203,
+          "latency_ms": 1531,
           "entry_count": 50,
           "feed_title": "darkreading",
           "bozo": false,
@@ -596,7 +596,7 @@
           "trust_score": 0.9,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 484,
+          "latency_ms": 1516,
           "entry_count": 15,
           "feed_title": "Unit 42",
           "bozo": false,
@@ -609,7 +609,7 @@
           "trust_score": 0.82,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 922,
+          "latency_ms": 1532,
           "entry_count": 10,
           "feed_title": "SecurityWeek",
           "bozo": false,
@@ -622,7 +622,7 @@
           "trust_score": 0.9,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 422,
+          "latency_ms": 500,
           "entry_count": 10,
           "feed_title": "Krebs on Security",
           "bozo": false,
@@ -635,7 +635,7 @@
           "trust_score": 0.8,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 438,
+          "latency_ms": 469,
           "entry_count": 250,
           "feed_title": "",
           "bozo": false,
@@ -650,7 +650,7 @@
           "trust_score": 0.83,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 328,
+          "latency_ms": 407,
           "entry_count": 10,
           "feed_title": "CyberScoop",
           "bozo": false,
@@ -663,7 +663,7 @@
           "trust_score": 0.85,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 516,
+          "latency_ms": 828,
           "entry_count": 5,
           "feed_title": "The Record from Recorded Future News",
           "bozo": false,
@@ -676,7 +676,7 @@
           "trust_score": 0.82,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 313,
+          "latency_ms": 328,
           "entry_count": 20,
           "feed_title": "Security Latest",
           "bozo": false,
@@ -689,7 +689,7 @@
           "trust_score": 0.9,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 437,
+          "latency_ms": 468,
           "entry_count": 10,
           "feed_title": "Blog",
           "bozo": false,
@@ -702,7 +702,7 @@
           "trust_score": 0.92,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 2766,
+          "latency_ms": 3094,
           "entry_count": 20,
           "feed_title": "Threat Intelligence",
           "bozo": false,
@@ -715,7 +715,7 @@
           "trust_score": 0.9,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 578,
+          "latency_ms": 656,
           "entry_count": 10,
           "feed_title": "Microsoft Security Blog",
           "bozo": false,
@@ -728,18 +728,24 @@
           "trust_score": 0.92,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 2156,
+          "latency_ms": 3282,
           "entry_count": 10,
           "feed_title": "Project Zero",
           "bozo": false,
           "warnings": []
         },
         {
-          "name": "Google TAG",
-          "url": "https://blog.google/threat-analysis-group/rss/",
-          "category": "research",
-          "trust_score": 0.92,
-          "status": "http_404"
+          "name": "Rapid7 Blog",
+          "url": "https://www.rapid7.com/blog/rss/",
+          "category": "cves",
+          "trust_score": 0.85,
+          "status": "ok",
+          "http_status": 200,
+          "latency_ms": 703,
+          "entry_count": 20,
+          "feed_title": "Rapid7 Cybersecurity Blog",
+          "bozo": false,
+          "warnings": []
         },
         {
           "name": "Recorded Future",
@@ -748,23 +754,23 @@
           "trust_score": 0.9,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 969,
+          "latency_ms": 765,
           "entry_count": 50,
           "feed_title": "Recorded Future",
           "bozo": false,
           "warnings": []
         },
         {
-          "name": "Secureworks CTU",
-          "url": "https://www.secureworks.com/rss?feed=blog",
-          "category": "apt",
+          "name": "URLhaus",
+          "url": "https://urlhaus.abuse.ch/feeds/json/",
+          "category": "phishing",
           "trust_score": 0.88,
-          "status": "timeout"
+          "status": "http_404"
         },
         {
-          "name": "Rapid7 Blog",
-          "url": "https://www.rapid7.com/blog/feed/",
-          "category": "cves",
+          "name": "Trend Micro",
+          "url": "https://www.trendmicro.com/en_us/research.rss",
+          "category": "global_ti",
           "trust_score": 0.85,
           "status": "http_404"
         },
@@ -775,7 +781,7 @@
           "trust_score": 0.85,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 329,
+          "latency_ms": 547,
           "entry_count": 10,
           "feed_title": "Tenable Blog",
           "bozo": false,
@@ -788,7 +794,7 @@
           "trust_score": 0.83,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 1344,
+          "latency_ms": 1719,
           "entry_count": 10,
           "feed_title": "Qualys Security Blog",
           "bozo": false,
@@ -801,26 +807,11 @@
           "trust_score": 0.85,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 688,
+          "latency_ms": 907,
           "entry_count": 20,
           "feed_title": "Malwarebytes",
           "bozo": false,
           "warnings": []
-        },
-        {
-          "name": "URLhaus",
-          "url": "https://urlhaus.abuse.ch/feeds/atom/",
-          "category": "phishing",
-          "trust_score": 0.88,
-          "status": "http_404"
-        },
-        {
-          "name": "Trend Micro",
-          "url": "https://feeds.trendmicro.com/Anti-MalwareBlog",
-          "category": "global_ti",
-          "trust_score": 0.85,
-          "status": "error",
-          "error": "HTTPSConnectionPool(host='feeds.trendmicro.com', port=443): Max retries exceeded with url: /Anti-MalwareBlog (Caused by SSLError(SSLEOFError(8, '[SSL:"
         },
         {
           "name": "Dragos ICS",
@@ -831,17 +822,31 @@
         },
         {
           "name": "Claroty",
-          "url": "https://www.claroty.com/blog/feed",
+          "url": "https://claroty.com/team82/blog/feed",
           "category": "ics",
           "trust_score": 0.88,
           "status": "http_410"
         },
         {
           "name": "Nozomi Networks",
-          "url": "https://www.nozominetworks.com/blog/feed/",
+          "url": "https://www.nozominetworks.com/blog/rss/",
           "category": "ics",
           "trust_score": 0.87,
           "status": "http_404"
+        },
+        {
+          "name": "NVD NIST CVEs",
+          "url": "https://nvd.nist.gov/feeds/xml/cve/misc/nvd-rss-analyzed.xml",
+          "category": "cves",
+          "trust_score": 0.95,
+          "status": "http_404"
+        },
+        {
+          "name": "Sophos News",
+          "url": "https://news.sophos.com/en-us/feed/",
+          "category": "global_ti",
+          "trust_score": 0.85,
+          "status": "timeout"
         },
         {
           "name": "CyberArk Research",
@@ -850,7 +855,7 @@
           "trust_score": 0.88,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 953,
+          "latency_ms": 1469,
           "entry_count": 0,
           "feed_title": "",
           "bozo": true,
@@ -867,7 +872,7 @@
           "trust_score": 0.92,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 438,
+          "latency_ms": 703,
           "entry_count": 15,
           "feed_title": "Check Point Research",
           "bozo": false,
@@ -880,7 +885,7 @@
           "trust_score": 0.9,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 719,
+          "latency_ms": 1000,
           "entry_count": 9,
           "feed_title": "ClearSky Cyber Security",
           "bozo": false,
@@ -893,7 +898,7 @@
           "trust_score": 0.92,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 796,
+          "latency_ms": 906,
           "entry_count": 10,
           "feed_title": "The Citizen Lab",
           "bozo": false,
@@ -906,7 +911,7 @@
           "trust_score": 0.85,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 422,
+          "latency_ms": 610,
           "entry_count": 0,
           "feed_title": "Comments on: Cyber Statecraft Initiative",
           "bozo": false,
@@ -915,11 +920,21 @@
           ]
         },
         {
-          "name": "NVD NIST CVEs",
-          "url": "https://nvd.nist.gov/feeds/xml/cve/misc/nvd-rss.xml",
-          "category": "cves",
-          "trust_score": 0.95,
-          "status": "http_404"
+          "name": "Group-IB",
+          "url": "https://www.group-ib.com/resources/threat-research/rss.xml",
+          "category": "apt",
+          "trust_score": 0.87,
+          "status": "ok",
+          "http_status": 200,
+          "latency_ms": 1078,
+          "entry_count": 0,
+          "feed_title": "",
+          "bozo": true,
+          "warnings": [
+            "feed has 0 entries",
+            "feed has no title element",
+            "parse warning: <unknown>:5:196: not well-formed (invalid token)"
+          ]
         },
         {
           "name": "Exploit-DB",
@@ -928,7 +943,7 @@
           "trust_score": 0.88,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 500,
+          "latency_ms": 516,
           "entry_count": 50,
           "feed_title": "Exploit-DB.com RSS Feed",
           "bozo": false,
@@ -941,7 +956,7 @@
           "trust_score": 0.83,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 2937,
+          "latency_ms": 3407,
           "entry_count": 0,
           "feed_title": "",
           "bozo": true,
@@ -952,20 +967,13 @@
           ]
         },
         {
-          "name": "Sophos News",
-          "url": "https://www.sophos.com/en-us/rss/sophos-news.xml",
-          "category": "global_ti",
-          "trust_score": 0.85,
-          "status": "timeout"
-        },
-        {
           "name": "Radware",
           "url": "https://www.radware.com/security/threat-advisories-and-attack-reports/rss/",
           "category": "israel",
           "trust_score": 0.85,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 1578,
+          "latency_ms": 1438,
           "entry_count": 0,
           "feed_title": "",
           "bozo": true,
@@ -982,7 +990,7 @@
           "trust_score": 0.83,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 1672,
+          "latency_ms": 1797,
           "entry_count": 1637,
           "feed_title": "Blog RSS Feed | Snyk",
           "bozo": false,
@@ -995,18 +1003,31 @@
           "trust_score": 0.82,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 969,
+          "latency_ms": 1266,
           "entry_count": 10,
           "feed_title": "ANY.RUN's Cybersecurity Blog",
           "bozo": false,
           "warnings": []
         },
         {
-          "name": "Group-IB",
-          "url": "https://www.group-ib.com/blog/feed/",
-          "category": "apt",
-          "trust_score": 0.87,
-          "status": "http_404"
+          "name": "CISA Alerts",
+          "url": "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+          "category": "global_ti",
+          "trust_score": 0.95,
+          "status": "http_403"
+        },
+        {
+          "name": "Cisco Talos",
+          "url": "https://blog.talosintelligence.com/rss/",
+          "category": "global_ti",
+          "trust_score": 0.9,
+          "status": "ok",
+          "http_status": 200,
+          "latency_ms": 859,
+          "entry_count": 15,
+          "feed_title": "Cisco Talos Blog",
+          "bozo": false,
+          "warnings": []
         },
         {
           "name": "The Hacker News",
@@ -1015,7 +1036,7 @@
           "trust_score": 0.85,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 1109,
+          "latency_ms": 1016,
           "entry_count": 50,
           "feed_title": "The Hacker News",
           "bozo": false,
@@ -1028,7 +1049,7 @@
           "trust_score": 0.85,
           "status": "ok",
           "http_status": 200,
-          "latency_ms": 359,
+          "latency_ms": 406,
           "entry_count": 15,
           "feed_title": "BleepingComputer",
           "bozo": false,
@@ -1037,14 +1058,11 @@
       ],
       "summary": {
         "total_active": 46,
-        "passed": 33,
-        "failed": 13,
+        "passed": 36,
+        "failed": 10,
         "failed_names": [
-          "CISA Alerts",
-          "Cisco Talos",
           "Google TAG",
           "Secureworks CTU",
-          "Rapid7 Blog",
           "URLhaus",
           "Trend Micro",
           "Dragos ICS",
@@ -1052,11 +1070,11 @@
           "Nozomi Networks",
           "NVD NIST CVEs",
           "Sophos News",
-          "Group-IB"
+          "CISA Alerts"
         ]
       }
     }
   },
-  "finished_at": "2026-06-08T19:28:52.161569+00:00",
+  "finished_at": "2026-06-08T19:44:30.082220+00:00",
   "overall": "PARTIAL"
 }

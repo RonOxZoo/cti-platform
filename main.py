@@ -58,7 +58,8 @@ def root():
         "status": "online",
         "version": "1.1.0",
         "endpoints": ["/health", "/ingest", "/enrich", "/cleanup", "/status",
-                      "/feeds/health", "/ask", "/search", "/trending"]
+                      "/feeds/health", "/ask", "/search", "/trending",
+                      "/notify/test", "/notify/daily"]
     }), 200
 
 
@@ -452,6 +453,86 @@ def trending():
         return jsonify({"status": "error", "message": str(e)}), 500
 
     return jsonify(payload), 200
+
+
+# ── Telegram notification endpoints ──────────────────────────
+@app.route("/notify/test", methods=["POST"])
+def notify_test():
+    """Auth-protected — send a test message to the Telegram channel."""
+    if not verify_key(request):
+        log.warning("[NOTIFY] Unauthorized request blocked")
+        return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
+
+    from notifier.telegram import send_message
+    sent = send_message(
+        "✅ <b>CTI Platform</b> — Telegram test message\n"
+        f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+    )
+    # Note: we never echo the chat ID or token back to the caller.
+    if sent:
+        return jsonify({"status": "success", "sent": True}), 200
+    return jsonify({
+        "status": "error",
+        "sent": False,
+        "hint": "Telegram not configured or send failed — check server logs",
+    }), 502
+
+
+@app.route("/notify/daily", methods=["POST"])
+def notify_daily():
+    """Auth-protected — compute last-24h stats and send the daily summary."""
+    if not verify_key(request):
+        log.warning("[NOTIFY] Unauthorized request blocked")
+        return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
+
+    from database.supabase_client import client
+    from notifier.telegram import send_daily_summary
+    from rag.search import get_trending_actors, get_trending_cves
+
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(hours=24)).isoformat()
+
+    def safe_count(fn, default=0):
+        try:
+            return fn() or 0
+        except Exception as e:
+            log.warning(f"[NOTIFY] daily metric unavailable: {str(e)[:120]}")
+            return default
+
+    def sev_count(labels):
+        return safe_count(lambda: client.table("intelligence_items")
+                          .select("id", count="exact")
+                          .in_("severity", labels)
+                          .gte("processed_at", cutoff)
+                          .execute().count)
+
+    try:
+        sources_processed = len(get_active_sources())
+    except Exception:
+        sources_processed = 0
+
+    stats = {
+        "date": now.strftime("%Y-%m-%d"),
+        "sources_processed": sources_processed,
+        "items_ingested": safe_count(lambda: client.table("raw_items")
+                                     .select("id", count="exact")
+                                     .gte("ingested_at", cutoff).execute().count),
+        "items_enriched": safe_count(lambda: client.table("intelligence_items")
+                                     .select("id", count="exact")
+                                     .gte("processed_at", cutoff).execute().count),
+        "critical": sev_count(["Critical", "critical", "CRITICAL"]),
+        "high": sev_count(["High", "high", "HIGH"]),
+        "medium": sev_count(["Medium", "medium", "MEDIUM"]),
+        "top_actors": get_trending_actors(days=1),
+        "top_cves": get_trending_cves(days=1),
+    }
+
+    sent = send_daily_summary(stats)
+    return jsonify({
+        "status": "success" if sent else "error",
+        "sent": sent,
+        "stats": stats,
+    }), (200 if sent else 502)
 
 
 # ── Entry point ──────────────────────────────────────────────

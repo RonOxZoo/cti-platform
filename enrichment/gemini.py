@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from google import genai
 
 from database.supabase_client import client
+from notifier.telegram import send_critical_alert, notify_enrichment_complete
 
 log = logging.getLogger(__name__)
 
@@ -303,6 +304,42 @@ def _log_quota_exceeded(started_at, items_processed):
         log.error(f"[GEMINI] failed to write quota_exceeded log: {e}")
 
 
+def _build_alert_item(job, result):
+    """Assemble the dict consumed by notifier.send_critical_alert()."""
+    iocs = result.get("iocs", {}) or {}
+    return {
+        "severity": result.get("severity"),
+        "source": result.get("category") or "OSINT",
+        "title": job.get("title"),
+        "confidence": result.get("confidence"),
+        "category": result.get("category"),
+        "actors": result.get("actors", []),
+        "cves": result.get("cves", []),
+        "mitre": result.get("mitre", []),
+        # Flatten hashes so the alert can render them inside <code> blocks.
+        "iocs": iocs,
+        "summary_en": result.get("summary_en"),
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+    }
+
+
+def _handle_notifications(job, result, stats):
+    """Tally severity for this enriched item and dispatch urgent alerts.
+
+    Alert rules:
+      - every CRITICAL item -> immediate alert
+      - every HIGH item with israel_relevance=True -> immediate alert
+    """
+    severity = (result.get("severity") or "").strip().lower()
+    if severity in ("critical", "high", "medium", "low"):
+        stats[severity] += 1
+
+    if severity == "critical":
+        send_critical_alert(_build_alert_item(job, result))
+    elif severity == "high" and bool(result.get("israel_relevance", False)):
+        send_critical_alert(_build_alert_item(job, result))
+
+
 def run_enrichment(limit=50):
     """Main orchestrator — enrich pending jobs one by one.
 
@@ -310,6 +347,7 @@ def run_enrichment(limit=50):
     Gemini tier, sleeping CALL_DELAY_SECONDS between calls.
     """
     stats = {"processed": 0, "succeeded": 0, "failed": 0, "skipped": 0,
+             "critical": 0, "high": 0, "medium": 0, "low": 0,
              "quota_exceeded": False, "errors": []}
     started_at = datetime.now(timezone.utc).isoformat()
 
@@ -347,6 +385,14 @@ def run_enrichment(limit=50):
             update_job_status(job_id, "done")
             stats["succeeded"] += 1
             log.info(f"[GEMINI] Enriched job {job_id} — {str(job.get('title'))[:60]}")
+
+            # Tally severity and fire Telegram alerts for the urgent items.
+            # Notification failures must never break enrichment, so this is
+            # fully isolated behind its own try/except.
+            try:
+                _handle_notifications(job, result, stats)
+            except Exception as notify_err:
+                log.error(f"[GEMINI] Notification step failed (non-fatal): {notify_err}")
         except Exception as e:
             # A 429 means the daily quota is gone. Don't retry and don't fail the
             # job — return it to pending, record the quota state, and stop.
@@ -370,6 +416,15 @@ def run_enrichment(limit=50):
         f"succeeded={stats['succeeded']} failed={stats['failed']} "
         f"skipped={stats['skipped']}"
     )
+
+    # Batch-complete summary notification (only sends when succeeded > 0).
+    # Isolated so a Telegram outage can never affect the enrichment result.
+    if stats["succeeded"] > 0:
+        try:
+            notify_enrichment_complete(stats)
+        except Exception as e:
+            log.error(f"[GEMINI] notify_enrichment_complete failed (non-fatal): {e}")
+
     return stats
 
 

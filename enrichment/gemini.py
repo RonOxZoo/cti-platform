@@ -208,6 +208,33 @@ def _source_categories(source_ids: list) -> dict:
     return out
 
 
+def _source_info(source_ids: list) -> dict:
+    """Map source_id -> {name, category, trust_score}. Best-effort — {} on error.
+
+    Used to give the Claude agent the source name/category/trust signals.
+    """
+    out = {}
+    ids = list({s for s in source_ids if s})
+    if not ids:
+        return out
+    try:
+        result = (
+            client.table("rss_sources")
+            .select("id, name, category, trust_score")
+            .in_("id", ids)
+            .execute()
+        )
+        for row in (result.data or []):
+            out[row.get("id")] = {
+                "name": row.get("name"),
+                "category": (row.get("category") or "").strip().lower(),
+                "trust_score": row.get("trust_score"),
+            }
+    except Exception as e:
+        log.error(f"[GEMINI] _source_info failed: {e}")
+    return out
+
+
 def prioritize_jobs(jobs: list) -> list:
     """Order pending jobs so CRITICAL/HIGH (and high-value sources) go first.
 
@@ -375,9 +402,14 @@ def build_intelligence_payload(job, result):
             "malware_families": malware_families,
             "c2_servers": iocs.get("c2_servers", []),
             "contradiction_note": result.get("contradiction_note"),
+            # Which engine produced this enrichment ("claude" or "gemini").
+            "enriched_by": result.get("enriched_by"),
         },
         "gemini_processed": True,
         "processed_at": datetime.now(timezone.utc).isoformat(),
+        # Always written so the column is a real boolean; check_contradictions
+        # flips it to True if it finds conflicting prior records.
+        "contradiction_flag": False,
     }
 
 
@@ -412,7 +444,7 @@ def insert_intelligence_item(job, result):
     """
     payload = build_intelligence_payload(job, result)
     try:
-        client.table("intelligence_items").upsert(payload, on_conflict="raw_item_id").execute()
+        res = client.table("intelligence_items").upsert(payload, on_conflict="raw_item_id").execute()
     except Exception as e:
         if _is_missing_column_error(e):
             log.warning(
@@ -421,9 +453,19 @@ def insert_intelligence_item(job, result):
                 f"{', '.join(_OPTIONAL_COLUMNS)} for now."
             )
             reduced = {k: v for k, v in payload.items() if k not in _OPTIONAL_COLUMNS}
-            client.table("intelligence_items").upsert(reduced, on_conflict="raw_item_id").execute()
+            res = client.table("intelligence_items").upsert(reduced, on_conflict="raw_item_id").execute()
         else:
             raise
+    # Return the row id so the caller can run contradiction checks against it.
+    if res.data:
+        return res.data[0].get("id")
+    # Upsert that updates an existing row may not echo data — fall back to lookup.
+    try:
+        found = (client.table("intelligence_items")
+                 .select("id").eq("raw_item_id", job["raw_item_id"]).limit(1).execute())
+        return found.data[0]["id"] if found.data else None
+    except Exception:
+        return None
 
 
 def update_job_status(job_id, status, error=None):
@@ -541,20 +583,44 @@ def _handle_notifications(job, result, stats):
         send_critical_alert(_build_alert_item(job, result))
 
 
+def _select_agent():
+    """Pick the enrichment engine: Claude (primary) -> Gemini (fallback) -> None.
+
+    Returns "claude" if ANTHROPIC_API_KEY is set, else "gemini" if GEMINI_API_KEY
+    is set, else None (caller skips the run with a warning).
+    """
+    if os.getenv("ANTHROPIC_API_KEY"):
+        return "claude"
+    if os.getenv("GEMINI_API_KEY"):
+        return "gemini"
+    return None
+
+
 def run_enrichment(limit=50):
     """Main orchestrator — enrich pending jobs one by one.
 
-    Processes at most MAX_ITEMS_PER_RUN items per call to stay within the free
-    Gemini tier, sleeping CALL_DELAY_SECONDS between calls.
+    Agent priority: Claude (if ANTHROPIC_API_KEY) -> Gemini (if GEMINI_API_KEY)
+    -> skip with a warning. Each item gets exactly one AI call; contradiction
+    detection afterwards is DB-only (zero tokens).
+
+    Processes at most MAX_ITEMS_PER_RUN items per call. CALL_DELAY_SECONDS spaces
+    out calls (Gemini free-tier protection; also keeps Claude well under its RPM).
     """
     stats = {"processed": 0, "succeeded": 0, "failed": 0, "skipped": 0,
              "critical": 0, "high": 0, "medium": 0, "low": 0,
-             "quota_exceeded": False, "errors": []}
+             "quota_exceeded": False, "contradictions": 0, "errors": []}
     started_at = datetime.now(timezone.utc).isoformat()
 
-    # If the previous run hit the daily quota, don't even start — wait until a
-    # later run records a clean status (i.e. the quota has reset).
-    if _last_run_quota_exceeded():
+    agent = _select_agent()
+    if agent is None:
+        log.warning("[ENRICH] No enrichment engine configured (set ANTHROPIC_API_KEY "
+                    "or GEMINI_API_KEY) — skipping run.")
+        stats["errors"].append("no enrichment engine configured")
+        return stats
+    log.info(f"[ENRICH] Using '{agent}' as the enrichment engine")
+
+    # Gemini-only: if the previous run hit the daily quota, skip until it resets.
+    if agent == "gemini" and _last_run_quota_exceeded():
         log.warning("[GEMINI] Daily quota was exhausted on the last run — skipping this run.")
         stats["quota_exceeded"] = True
         return stats
@@ -564,15 +630,18 @@ def run_enrichment(limit=50):
 
     # Fetch the requested number of pending jobs, order them by priority
     # (CRITICAL/HIGH and high-value sources first), then cap how many we
-    # actually process this run so we don't blow through the free-tier limit.
+    # actually process this run.
     fetched = get_pending_jobs(limit=limit)
     ordered = prioritize_jobs(fetched)
     jobs = ordered[:MAX_ITEMS_PER_RUN]
     stats["skipped"] = len(fetched) - len(jobs)
+    src_info = _source_info([j.get("source_id") for j in jobs])
     log.info(
-        f"[GEMINI] {len(fetched)} pending jobs fetched — processing {len(jobs)} "
+        f"[ENRICH] {len(fetched)} pending jobs fetched — processing {len(jobs)} "
         f"by priority (cap={MAX_ITEMS_PER_RUN}), skipping {stats['skipped']} for next run"
     )
+
+    from enrichment.contradiction import check_contradictions
 
     for i, job in enumerate(jobs):
         # Throttle between calls (not before the first one).
@@ -582,24 +651,42 @@ def run_enrichment(limit=50):
         stats["processed"] += 1
         job_id = job.get("job_id")
         try:
-            prompt = build_prompt(job["title"], job["raw_content"])
-            result = call_gemini_with_retry(prompt)
-            insert_intelligence_item(job, result)
+            # ── 1. The ONLY AI call for this item ──
+            if agent == "claude":
+                from enrichment.claude_agent import enrich_with_claude
+                sinfo = src_info.get(job.get("source_id"), {})
+                result = enrich_with_claude(
+                    job["title"], job["raw_content"],
+                    sinfo.get("name"), sinfo.get("category"), sinfo.get("trust_score"),
+                )
+            else:
+                result = call_gemini_with_retry(build_prompt(job["title"], job["raw_content"]))
+                result["enriched_by"] = "gemini"
+
+            # ── 2. Store the enriched item, get its id ──
+            item_id = insert_intelligence_item(job, result)
+
+            # ── 3. Contradiction detection (DB-only, zero tokens) ──
+            try:
+                contra = check_contradictions(result, item_id)
+                if contra.get("has_contradictions"):
+                    stats["contradictions"] += 1
+            except Exception as contra_err:
+                log.error(f"[ENRICH] Contradiction step failed (non-fatal): {contra_err}")
+
+            # ── 4. Mark the job done ──
             update_job_status(job_id, "done")
             stats["succeeded"] += 1
-            log.info(f"[GEMINI] Enriched job {job_id} — {str(job.get('title'))[:60]}")
+            log.info(f"[ENRICH] Enriched job {job_id} via {agent} — {str(job.get('title'))[:60]}")
 
             # Tally severity and fire Telegram alerts for the urgent items.
-            # Notification failures must never break enrichment, so this is
-            # fully isolated behind its own try/except.
             try:
                 _handle_notifications(job, result, stats)
             except Exception as notify_err:
-                log.error(f"[GEMINI] Notification step failed (non-fatal): {notify_err}")
+                log.error(f"[ENRICH] Notification step failed (non-fatal): {notify_err}")
         except Exception as e:
-            # A 429 means the daily quota is gone. Don't retry and don't fail the
-            # job — return it to pending, record the quota state, and stop.
-            if _is_rate_limit_error(e):
+            # Gemini-only: a 429 means the daily quota is gone — requeue and stop.
+            if agent == "gemini" and _is_rate_limit_error(e):
                 log.warning("[GEMINI] Daily quota reached, stopping enrichment.")
                 stats["processed"] -= 1  # this job never completed — back to pending
                 mark_job_pending(job_id)
@@ -610,7 +697,7 @@ def run_enrichment(limit=50):
             stats["failed"] += 1
             msg = f"job {job_id}: {str(e)[:200]}"
             stats["errors"].append(msg)
-            log.error(f"[GEMINI] Enrichment failed for {msg}")
+            log.error(f"[ENRICH] Enrichment failed for {msg}")
             update_job_status(job_id, "failed", error=str(e))
             continue
 

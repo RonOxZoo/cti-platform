@@ -10,7 +10,7 @@ from curl_cffi.requests import exceptions as cffi_exc
 from urllib.parse import urlparse
 from datetime import datetime, timezone, timedelta
 from utils.hashing import compute_hash
-from config import BROWSER_SERVICE_URL
+from config import BROWSER_SERVICE_URL, FULL_FETCH_THRESHOLD
 from database.supabase_client import (
     hash_exists,
     insert_raw_item,
@@ -164,13 +164,41 @@ def _is_json_response(response) -> bool:
 
 # ── Item ingestion ───────────────────────────────────────────────────────────
 
-def _ingest_item(title, url, content, pub_date, source_id, stats):
+def maybe_fetch_full_article(title, url, content, source_name):
+    """Return full article text for short RSS excerpts; otherwise the excerpt.
+
+    Token-efficiency / resource trade-off: feeds that already deliver the full
+    body (>= FULL_FETCH_THRESHOLD chars) are used as-is — no Playwright call.
+    Only genuinely short excerpts trigger the (expensive) browser-service fetch,
+    so Claude analyzes complete articles without us hammering the browser
+    service for feeds that don't need it. Falls back to the excerpt on any error.
+    """
+    content = content or ""
+    if len(content) >= FULL_FETCH_THRESHOLD:
+        log.info(f"[FETCH] Using RSS content (sufficient length) for: {title}")
+        return content
+    if not (url and BROWSER_SERVICE_URL):
+        # Can't fetch — keep whatever excerpt we have.
+        return content
+    try:
+        full = fetch_via_browser_service(url, source_name)
+        if full and len(full) > len(content):
+            log.info(f"[FETCH] Full article fetched via Playwright for: {title}")
+            return full
+    except Exception as e:
+        log.warning(f"[FETCH] Full-article fetch failed for {title!r}: {str(e)[:120]}")
+    return content
+
+
+def _ingest_item(title, url, content, pub_date, source_id, source_name, stats):
     """Dedup and insert a single normalized item (shared by RSS + JSON paths)."""
     title = (title or "").strip()
     url = (url or "").strip()
     if not url:
         stats['skipped'] += 1
         return
+    # Upgrade short excerpts to the full article before dedup/insert.
+    content = maybe_fetch_full_article(title, url, content, source_name)
     content_hash = compute_hash(title, url, pub_date)
     if hash_exists(content_hash):
         stats['skipped'] += 1
@@ -202,6 +230,7 @@ def _process_feed(feed, source_id, source_name, stats):
             content=get_content(entry),
             pub_date=parse_date(entry),
             source_id=source_id,
+            source_name=source_name,
             stats=stats,
         )
     update_source_last_polled(source_id)
@@ -307,6 +336,7 @@ def _process_json_feed(raw_text, source_id, source_name, stats):
             content=item["content"],
             pub_date=item["pub_date"],
             source_id=source_id,
+            source_name=source_name,
             stats=stats,
         )
     update_source_last_polled(source_id)

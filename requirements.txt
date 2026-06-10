@@ -7,3 +7,7 @@ supabase==2.31.0
 pyspellchecker==0.9.0
 colorama==0.4.6
 google-genai==0.8.0
+anthropic==0.39.0
+# anthropic 0.39.0 calls httpx.Client(proxies=...), which httpx>=0.28 removed.
+# Pin httpx to a 0.27.x release that both anthropic 0.39.0 and supabase 2.31 accept.
+httpx==0.27.2

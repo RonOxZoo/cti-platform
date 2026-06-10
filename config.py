@@ -10,6 +10,18 @@ PORT = int(os.getenv('PORT', 5000))
 BROWSER_SERVICE_URL = os.getenv('BROWSER_SERVICE_URL', '')
 RENDER_SERVICE_URL = os.getenv('RENDER_SERVICE_URL', '')
 
+# Claude (Anthropic) enrichment agent — primary enrichment engine.
+# ANTHROPIC_API_KEY is a secret; never log it or return it in an API response.
+# The model is env-overridable so it can be moved to claude-sonnet-4-6 (current
+# Sonnet) without a code change — the default below is the snapshot requested
+# for this build (note: claude-sonnet-4-20250514 is deprecated, retires 2026-06-15).
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+
+# Playwright full-article fetch: when an RSS excerpt is shorter than this many
+# characters, fetch the full article via the browser service instead.
+FULL_FETCH_THRESHOLD = int(os.getenv("FULL_FETCH_THRESHOLD", 500))
+
 # Telegram notifications. Both must be set for notifications to be sent.
 # NOTE: the bot token is a secret — never log it or return it in an API response.
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")

@@ -31,6 +31,14 @@ from datetime import datetime, timezone
 
 from config import API_SECRET_KEY, ANTHROPIC_API_KEY, BROWSER_SERVICE_URL
 from utils.hashing import compute_hash
+
+# The report/summaries contain Hebrew + emoji; the default Windows console is
+# cp1252 and would crash on print(). Force UTF-8 (replace on any stray char).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 from utils.text_compressor import compress_for_llm, extract_ioc_hints
 from database.supabase_client import client
 from main import app
@@ -104,6 +112,15 @@ def check(label, passed):
     print(f"  [{'PASS' if passed else 'FAIL'}] {label}")
 
 
+def soft_check(label, passed):
+    """Informational check — printed but NOT counted toward the overall verdict.
+
+    Used for optional/best-effort dependencies (Telegram, browser service) whose
+    absence should not fail the whole suite.
+    """
+    print(f"  [{'PASS' if passed else 'WARN'}] {label} (soft — not counted)")
+
+
 def info(msg):
     print(f"  - {msg}")
 
@@ -163,11 +180,11 @@ def step0_preflight():
     check("Supabase connection works", db_ok)
     critical_ok = critical_ok and db_ok
 
-    # Telegram (soft — warn only).
+    # Telegram (soft — warn only, never fails the suite).
     tg_ok = bool(os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID"))
-    check("Telegram configured (soft)", tg_ok)
+    soft_check("Telegram configured", tg_ok)
 
-    # Browser service (soft — warn only).
+    # Browser service (soft — warn only, never fails the suite).
     if BROWSER_SERVICE_URL:
         try:
             import requests
@@ -177,8 +194,8 @@ def step0_preflight():
             br_ok = False
     else:
         br_ok = False
-        info("BROWSER_SERVICE_URL not set — browser fetch disabled (soft)")
-    check("Browser service alive (soft)", br_ok)
+        info("BROWSER_SERVICE_URL not set — browser fetch disabled")
+    soft_check("Browser service alive", br_ok)
 
     if not critical_ok:
         banner("PRE-FLIGHT FAILED — aborting before any Claude call")
@@ -236,6 +253,17 @@ def insert_item_and_job():
         "raw_item_id": raw_item_id, "status": "pending",
     }).execute()
     info(f"queued processing_job {job.data[0]['id']} (pending)")
+
+    # Prioritize our item: pre-seed a critical-severity stub so prioritize_jobs()
+    # ranks it at the front of the (priority-capped) batch even against a large
+    # backlog. /enrich UPSERTs the real Claude output over this stub on conflict.
+    try:
+        client.table("intelligence_items").upsert(
+            {"raw_item_id": raw_item_id, "severity": "critical"},
+            on_conflict="raw_item_id").execute()
+        info("pre-seeded critical-priority stub for the test item")
+    except Exception as e:
+        info(f"could not pre-seed priority stub (non-fatal): {str(e)[:120]}")
     return raw_item_id
 
 
@@ -254,7 +282,7 @@ def seed_conflicting_ioc():
             info(f"updated existing IOC {CONFLICT_IOC} -> [{CONFLICT_ACTOR}]")
         else:
             client.table("iocs").insert({
-                "value": CONFLICT_IOC, "type": "ips",
+                "value": CONFLICT_IOC, "type": "ip",
                 "linked_actors": [CONFLICT_ACTOR],
             }).execute()
             info(f"seeded IOC {CONFLICT_IOC} -> [{CONFLICT_ACTOR}]")
@@ -265,17 +293,30 @@ def seed_conflicting_ioc():
 
 
 # ── STEP 3 — POST /enrich ──
-def step3_enrich():
+def step3_enrich(raw_item_id):
     banner("STEP 3b — POST /enrich (Claude DAG enrichment + contradiction check)")
-    resp = http.post("/enrich", json={"limit": 50}, headers=HEADERS)
-    body = resp.get_json() or {}
-    print(f"  HTTP {resp.status_code}  ->  {json.dumps(body, ensure_ascii=False)[:360]}")
-    info(f"processed={body.get('processed')} succeeded={body.get('succeeded')} "
-         f"failed={body.get('failed')} contradictions={body.get('contradictions')} "
-         f"tokens={body.get('tokens_used')} credits_exhausted={body.get('credits_exhausted')}")
-    if body.get("credits_exhausted"):
-        banner("CLAUDE CREDITS EXHAUSTED — add credits at "
-               "https://console.anthropic.com/settings/billing")
+    # The pending queue is priority-capped at MAX_ITEMS_PER_RUN per call. Our test
+    # item is pre-seeded critical so it leads the batch, but against a large
+    # backlog we may need a few drains until it is actually enriched. Bounded so
+    # we never run away (each attempt = one capped batch of Claude calls).
+    body = {}
+    for attempt in range(1, 4):
+        resp = http.post("/enrich", json={"limit": 50}, headers=HEADERS)
+        body = resp.get_json() or {}
+        print(f"  attempt {attempt}: HTTP {resp.status_code}  ->  "
+              f"{json.dumps(body, ensure_ascii=False)[:300]}")
+        info(f"processed={body.get('processed')} succeeded={body.get('succeeded')} "
+             f"failed={body.get('failed')} contradictions={body.get('contradictions')} "
+             f"tokens={body.get('tokens_used')} credits_exhausted={body.get('credits_exhausted')}")
+        if body.get("credits_exhausted"):
+            banner("CLAUDE CREDITS EXHAUSTED — add credits at "
+                   "https://console.anthropic.com/settings/billing")
+            break
+        row = fetch_row(raw_item_id)
+        if row and (row.get("summary_en") or "").strip():
+            info(f"test item enriched on attempt {attempt}")
+            break
+        info(f"test item not yet enriched (attempt {attempt}) — draining queue…")
     return body
 
 
@@ -309,6 +350,13 @@ def step3_verify(raw_item_id):
     check(f"compression_ratio recorded (got {enr.get('compression_ratio')})",
           enr.get("compression_ratio") is not None)
     check(f"model recorded (got {enr.get('model')})", bool(enr.get("model")))
+    # 6-stage DAG structure present in enrichment_data.
+    stages = enr.get("stages") or {}
+    stage_keys = ("extraction", "severity_validation", "confidence_metrics",
+                  "historical_audit", "trend_discovery", "meta_learning_loop")
+    present = [k for k in stage_keys if k in stages]
+    check(f"6-stage JSON structure present (got {len(present)}/6)",
+          len(present) == 6)
     # Contradiction check ran iff the flag is an actual boolean (true or false).
     check(f"contradiction check ran (flag={row.get('contradiction_flag')!r})",
           isinstance(row.get("contradiction_flag"), bool))
@@ -361,6 +409,10 @@ def step5_report(row):
           in_critical or (in_report and crit_idx != -1))
     check("Hebrew section populated", _hebrew(html))
     check("Token-Efficiency section present", "Token Efficiency" in html)
+    # ── Defang assertions (Pillar 7) ──
+    check("no raw http:// URLs in report", "http://" not in html.lower())
+    check(f"C2 IP {CONFLICT_IOC} is defanged (not raw)", CONFLICT_IOC not in html)
+    check("defanged IP form present (x.x.x[.]x)", "[.]" in html)
 
 
 # ── STEP 6 — delivery ──
@@ -383,7 +435,7 @@ def main():
 
     raw_item_id = insert_item_and_job()
     seeded = seed_conflicting_ioc()
-    step3_enrich()
+    step3_enrich(raw_item_id)
     row = step3_verify(raw_item_id)
     step4_contradiction(raw_item_id, seeded)
     if row is not None:

@@ -35,6 +35,17 @@ except Exception:  # pragma: no cover - exercised only without bs4 installed
     BeautifulSoup = None
     _HAS_BS4 = False
 
+# Prefer the lxml parser (faster, more lenient); fall back to the stdlib parser.
+try:
+    import lxml  # noqa: F401
+    _BS4_PARSER = "lxml"
+except Exception:  # pragma: no cover
+    _BS4_PARSER = "html.parser"
+
+# Re-export defang_for_output so callers can pull it from the compressor module
+# (Section 3 groups it here). The implementation lives in utils.defang.
+from utils.defang import defang_for_output  # noqa: E402,F401
+
 MAX_CONTENT_LENGTH = 3000
 
 # Low-value English stop words removed before sending text to the LLM. Kept to
@@ -89,7 +100,7 @@ def _strip_html(text: str) -> str:
     """
     if _HAS_BS4:
         try:
-            soup = BeautifulSoup(text, "html.parser")
+            soup = BeautifulSoup(text, _BS4_PARSER)
             for tag in soup(["script", "style", "noscript", "template"]):
                 tag.decompose()
             return soup.get_text(separator=" ")

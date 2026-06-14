@@ -412,6 +412,10 @@ def build_intelligence_payload(job, result):
             "compression_ratio": result.get("compression_ratio"),
             "processing_time_ms": result.get("processing_time_ms"),
             "detected_language": result.get("detected_language"),
+            # Full 6-stage Claude DAG output (extraction/severity_validation/
+            # confidence_metrics/historical_audit/trend_discovery/meta_learning_loop).
+            # Claude-only; Gemini fallback leaves this None.
+            "stages": result.get("stages"),
         },
         "gemini_processed": True,
         "processed_at": datetime.now(timezone.utc).isoformat(),

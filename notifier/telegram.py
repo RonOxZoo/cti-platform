@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 import requests
 
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from utils.defang import defang_all
 
 log = logging.getLogger(__name__)
 
@@ -46,8 +47,13 @@ def _esc(value) -> str:
 
 
 def _code(value) -> str:
-    """Wrap a value in an escaped <code> block (inert monospace, no auto-link)."""
-    return f"<code>{_esc(value)}</code>"
+    """Wrap an indicator in an escaped, DEFANGED <code> block.
+
+    All <code>-wrapped values are IOC-ish (IPs/domains/hashes/actors/CVEs/MITRE);
+    defanging neutralizes any live URL/IP/domain before it leaves the platform
+    (Pillar 7). Non-IOC tokens (CVE ids, MITRE ids, actor names) are unaffected.
+    """
+    return f"<code>{_esc(defang_all(str(value if value is not None else '')))}</code>"
 
 
 def _code_list(values, empty: str = "None") -> str:
@@ -152,7 +158,7 @@ def send_critical_alert(item: dict) -> bool:
         f"👤 Actors: {_code_list(item.get('actors'), empty='Unknown')}\n"
         f"🔍 CVEs: {_code_list(item.get('cves'), empty='None')}\n"
         f"🛡 MITRE: {_code_list(item.get('mitre'), empty='N/A')}\n\n"
-        f"📝 {_esc(summary[:300])}\n\n"
+        f"📝 {_esc(defang_all(summary[:300]))}\n\n"
         f"⏰ {_esc(timestamp)}"
     )
     return send_message(text)

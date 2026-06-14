@@ -24,6 +24,7 @@ from collections import Counter
 from datetime import datetime, timezone, timedelta
 
 from database.supabase_client import client
+from utils.defang import defang_all
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +59,15 @@ _SEV_COLOR = {
 def _esc(value) -> str:
     """HTML-escape a value for safe inclusion in the report."""
     return html.escape(str(value if value is not None else ""))
+
+
+def _esc_defang(value) -> str:
+    """Defang IOCs then HTML-escape — for any value shown to a human (Pillar 7).
+
+    Applied to IOC values and summaries so no live URL/IP/domain reaches the
+    Gmail/preview output (http:// -> hxxp://, dots in hosts/IPs -> [.]).
+    """
+    return html.escape(defang_all(str(value if value is not None else "")))
 
 
 def _norm_sev(severity) -> str:
@@ -202,7 +212,7 @@ def _event_card(item: dict, *, show_summary: bool = True, show_indicators: bool 
     color = _sev_color(sev)
     title = _esc(item.get("title_en") or item.get("title_he") or "(untitled)")
     source = _esc(_source_of(item))
-    summary = _esc((item.get("summary_en") or "").strip())
+    summary = _esc_defang((item.get("summary_en") or "").strip())
 
     indicators_html = ""
     if show_indicators:
@@ -220,7 +230,7 @@ def _event_card(item: dict, *, show_summary: bool = True, show_indicators: bool 
         if iocs:
             rows.append(f'<div style="margin-top:4px;color:{_MUTED};font-size:12px;font-family:monospace;">'
                         f'<b style="color:{_TEXT};font-family:Arial,sans-serif;">IOCs:</b> '
-                        f'{_esc(", ".join(iocs[:10]))}</div>')
+                        f'{_esc_defang(", ".join(iocs[:10]))}</div>')
         indicators_html = "".join(rows)
 
     summary_html = ""
@@ -390,7 +400,9 @@ def _build_html(date_label: str, items: list, stats: dict) -> str:
         # IOC summary — top 10 by occurrence count.
         ioc_rows = []
         for val, count in ioc_counter.most_common(10):
-            ioc_rows.append([(ioc_types.get(val, "ioc"), False), (val, True), (str(count), False)])
+            # Defang the indicator before display (Pillar 7).
+            ioc_rows.append([(ioc_types.get(val, "ioc"), False),
+                             (defang_all(str(val)), True), (str(count), False)])
         sections.append(_section(
             "🔎 IOC Summary (Top 10)",
             _table(["Type", "Indicator", "Count"], ioc_rows, empty="No IOCs extracted today."),
@@ -409,7 +421,7 @@ def _build_html(date_label: str, items: list, stats: dict) -> str:
                 f'<div dir="rtl" style="margin-bottom:12px;padding:10px 12px;background:{_PANEL_ALT};'
                 f'border-radius:6px;text-align:right;">'
                 f'<div style="font-weight:600;color:{_TEXT};font-size:14px;">{_esc(title)}</div>'
-                f'<div style="margin-top:4px;color:{_TEXT};font-size:13px;line-height:1.6;">{_esc(summary)}</div>'
+                f'<div style="margin-top:4px;color:{_TEXT};font-size:13px;line-height:1.6;">{_esc_defang(summary)}</div>'
                 f'</div>'
                 for title, summary in he_summaries
             )
@@ -460,8 +472,8 @@ def _build_html(date_label: str, items: list, stats: dict) -> str:
         for c in contras:
             contra_rows.append([
                 (c.get("conflict_type") or "—", False),
-                (str(c.get("old_value") or "")[:60], False),
-                (str(c.get("new_value") or "")[:60], False),
+                (defang_all(str(c.get("old_value") or ""))[:60], False),
+                (defang_all(str(c.get("new_value") or ""))[:60], False),
             ])
         contra_inner = _table(["Type", "OLD claim", "NEW claim"], contra_rows)
     else:

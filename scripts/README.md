@@ -122,6 +122,32 @@ After a validation run, open `dead_feeds.csv` and act on the `recommendation`:
 
 ---
 
+## 5. Apply the data-retention cron — `sql/data_retention_cron.sql`
+
+Rolling 2-month retention (current month + previous full month), run **daily at
+00:00 UTC** via `pg_cron`. Apply once in the Supabase SQL Editor:
+
+1. (First time only) enable pg_cron: `CREATE EXTENSION IF NOT EXISTS pg_cron;`
+2. Paste + run `sql/data_retention_cron.sql`. It creates
+   `cleanup_old_data_rolling()` and schedules two idempotent jobs:
+   `daily-retention-cleanup` (00:00, deletes/archives) and
+   `daily-retention-vacuum` (00:15, `VACUUM ANALYZE`).
+
+Never deleted: `iocs`, `cves`, `threat_actors`, `monthly_reports`,
+`contradiction_checks`. Manual run:
+```sql
+SELECT cleanup_old_data_rolling();
+VACUUM ANALYZE raw_items, intelligence_items, processing_jobs, ingestion_logs;
+```
+
+## 6. (Optional) normalized feed catalog — `sql/create_feed_sources.sql`
+
+Creates the stricter `feed_sources` table (CHECK constraints on
+`ingest_method`/`native_lang`). Forward-looking; the live pipeline still reads
+`rss_sources`. Apply it in the SQL Editor if you intend to migrate ingestion.
+
+---
+
 ## Other scripts
 
 - `scripts/migrate_cisa_kev.py` — one-off: switch CISA from its RSS advisories

@@ -83,6 +83,33 @@ def _prior_actor_set(prior_start_iso: str, start_iso: str) -> set:
     return seen
 
 
+def _quota_days(start_iso: str, end_iso: str) -> list:
+    """UTC dates in the window where the Gemini enrichment quota was hit.
+
+    Reads ingestion_logs rows written by enrichment/gemini.py with
+    scenario_name='python_gemini_enrichment' and status='quota_exceeded'.
+    Best-effort -> [].
+    """
+    from enrichment.gemini import ENRICHMENT_SCENARIO
+    days = set()
+    try:
+        res = (client.table("ingestion_logs")
+               .select("started_at, status, scenario_name")
+               .eq("scenario_name", ENRICHMENT_SCENARIO)
+               .eq("status", "quota_exceeded")
+               .gte("started_at", start_iso)
+               .lt("started_at", end_iso)
+               .limit(200)
+               .execute())
+        for row in (res.data or []):
+            ts = str(row.get("started_at") or "")[:10]
+            if ts:
+                days.add(ts)
+    except Exception as e:
+        log.warning(f"[WEEKLY] quota-days query unavailable: {str(e)[:120]}")
+    return sorted(days)
+
+
 def _tags_of(item: dict) -> list:
     """All lowercased tags + categories for an item."""
     out = [str(t).strip().lower() for t in (item.get("tags") or []) if t]
@@ -94,10 +121,14 @@ def _aggregate(items: list, prior_actors: set) -> dict:
     """Compute every statistic the report needs from the fetched items."""
     sev = Counter(_norm_sev(i.get("severity")) for i in items)
     cve_c, actor_c, ioc_c, mitre_c, sector_c = Counter(), Counter(), Counter(), Counter(), Counter()
+    engine_c = Counter()
+    tokens_total = 0
     ioc_types = {}
 
     for i in items:
         ed = i.get("enrichment_data") or {}
+        engine_c[(ed.get("enriched_by") or "unknown").lower()] += 1
+        tokens_total += int(ed.get("tokens_used") or 0)
         for c in (ed.get("cves") or []):
             if c:
                 cve_c[str(c).strip()] += 1
@@ -125,6 +156,8 @@ def _aggregate(items: list, prior_actors: set) -> dict:
         "ioc_types": ioc_types,
         "mitre_counter": mitre_c,
         "sector_counter": sector_c,
+        "engine_counter": engine_c,
+        "tokens_total": tokens_total,
         "new_actors": new_actors[:15],
         "israel_items": [i for i in items if i.get("israel_relevance")],
         "iran_items": [i for i in items if i.get("iran_nexus")],
@@ -348,13 +381,45 @@ def _build_html(stats: dict, agg: dict, narrative: dict) -> str:
         accent=_MUTED,
     ))
 
-    # 11. Hebrew executive summary (RTL).
+    # 11. Engine usage & Gemini quota tracking.
+    engine_c = agg.get("engine_counter") or Counter()
+    claude_n = engine_c.get("claude", 0)
+    gemini_n = engine_c.get("gemini", 0)
+    quota_days = stats.get("quota_days") or []
+    claude_days = max(0, stats.get("days", 7) - len(quota_days))
+    if quota_days:
+        rec = (f"Gemini quota was hit on {len(quota_days)} day(s). "
+               "Ensure ANTHROPIC_API_KEY is funded so Claude (primary) carries the "
+               "load next week; Gemini should only run when Claude's key is absent.")
+    elif gemini_n and not claude_n:
+        rec = ("All items ran on the Gemini fallback — ANTHROPIC_API_KEY was not "
+               "set. Configure Claude (primary) for next week.")
+    else:
+        rec = "Claude (primary) handled enrichment with no quota issues. No change needed."
+    engine_rows = [
+        [("Items via Claude (primary)", False), (str(claude_n), False)],
+        [("Items via Gemini (fallback)", False), (str(gemini_n), False)],
+        [("Total tokens (Claude)", False), (f"{agg.get('tokens_total', 0):,}", False)],
+        [("Days Gemini quota hit", False), (str(len(quota_days)), False)],
+        [("Days without quota issues", False), (str(claude_days), False)],
+    ]
+    sections.append(_section(
+        "11 · Engine Usage & Gemini Quota",
+        _table(["Metric", "Value"], engine_rows, empty="No enrichment telemetry.")
+        + f'<div style="margin-top:10px;color:{_MUTED};font-size:12px;">Quota days: '
+        f'<span style="color:{_TEXT};">{_esc(", ".join(quota_days) or "none")}</span></div>'
+        + f'<div style="margin-top:8px;font-weight:600;color:{_ACCENT};">Recommendation</div>'
+        f'<div style="color:{_TEXT};font-size:13px;line-height:1.6;">{_esc(rec)}</div>',
+        accent=_MUTED,
+    ))
+
+    # 12. Hebrew executive summary (RTL).
     sections.append(
         '<tr><td style="padding:0 20px 18px 20px;">'
         f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         f'style="background:{_PANEL};border:1px solid {_BORDER};border-radius:10px;">'
         f'<tr><td dir="rtl" style="padding:14px 18px 6px 18px;border-bottom:2px solid {_ACCENT};text-align:right;">'
-        f'<span style="font-size:16px;font-weight:700;color:{_TEXT};">11 · תקציר מנהלים (עברית)</span></td></tr>'
+        f'<span style="font-size:16px;font-weight:700;color:{_TEXT};">12 · תקציר מנהלים (עברית)</span></td></tr>'
         f'<tr><td dir="rtl" style="padding:14px 18px 16px 18px;text-align:right;">'
         f'{_prose(narrative.get("executive_summary_he"))}</td></tr>'
         f'</table></td></tr>'
@@ -463,6 +528,7 @@ def generate_weekly_report(days: int = 7) -> dict:
     items = _fetch_window(start_iso, end_iso)
     prior_actors = _prior_actor_set(prior_start.isoformat(), start_iso)
     agg = _aggregate(items, prior_actors)
+    quota_days = _quota_days(start_iso, end_iso)
 
     sev = agg["severity"]
     stats = {
@@ -479,6 +545,9 @@ def generate_weekly_report(days: int = 7) -> dict:
         "top_actors": agg["actor_counter"].most_common(10),
         "top_cves": agg["cve_counter"].most_common(10),
         "top_categories": agg["sector_counter"].most_common(10),
+        "quota_days": quota_days,
+        "tokens_total": agg.get("tokens_total", 0),
+        "engine_usage": dict(agg.get("engine_counter") or {}),
     }
 
     narrative = _gemini_narrative(stats, agg, items)

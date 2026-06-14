@@ -1,4 +1,5 @@
 import os
+import hmac
 import json
 import time
 import logging
@@ -23,10 +24,12 @@ app = Flask(__name__)
 
 # ── Auth ─────────────────────────────────────────────────────
 def verify_key(req) -> bool:
+    # Constant-time comparison; never log the key material (it is a secret).
     received = req.headers.get("X-API-Key", "").strip()
-    expected = API_SECRET_KEY.strip()
-    log.info(f"[AUTH] Key check — received='{received}' match={received == expected}")
-    return received == expected
+    expected = (API_SECRET_KEY or "").strip()
+    match = bool(expected) and hmac.compare_digest(received, expected)
+    log.info(f"[AUTH] Key check — match={match}")
+    return match
 
 
 # ── Simple in-memory rate limiter ────────────────────────────

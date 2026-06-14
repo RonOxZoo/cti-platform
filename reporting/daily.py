@@ -148,6 +148,37 @@ def _fetch_items(start_iso: str, end_iso: str) -> list:
         return []
 
 
+def _fetch_source_health() -> list:
+    """Active sources with error_count > 0, worst first. Best-effort -> []."""
+    try:
+        res = (client.table("rss_sources")
+               .select("name, error_count, active")
+               .gt("error_count", 0)
+               .order("error_count", desc=True)
+               .limit(50)
+               .execute())
+        return res.data or []
+    except Exception as e:
+        log.warning(f"[REPORT] source-health query unavailable: {str(e)[:120]}")
+        return []
+
+
+def _fetch_contradictions(start_iso: str, end_iso: str) -> list:
+    """contradiction_checks rows created within the window. Best-effort -> []."""
+    try:
+        res = (client.table("contradiction_checks")
+               .select("conflict_type, old_value, new_value, analyst_note, created_at")
+               .gte("created_at", start_iso)
+               .lt("created_at", end_iso)
+               .order("created_at", desc=True)
+               .limit(50)
+               .execute())
+        return res.data or []
+    except Exception as e:
+        log.warning(f"[REPORT] contradiction query unavailable: {str(e)[:120]}")
+        return []
+
+
 # ── HTML building blocks (all inline-styled for mail-client safety) ──
 def _section(title: str, inner_html: str, *, accent: str = _ACCENT) -> str:
     """Wrap a section body in a titled, bordered panel."""
@@ -271,6 +302,13 @@ def _build_html(date_label: str, items: list, stats: dict) -> str:
     ioc_counter = Counter()
     ioc_types = {}
     he_summaries = []
+    # Token-efficiency + language telemetry (from enrichment_data).
+    total_tokens = 0
+    total_cost = 0.0
+    comp_sum = 0.0
+    comp_n = 0
+    engine_counter = Counter()
+    lang_counter = Counter()
     for i in items:
         ed = i.get("enrichment_data") or {}
         for c in (ed.get("cves") or []):
@@ -285,6 +323,18 @@ def _build_html(date_label: str, items: list, stats: dict) -> str:
         he = (i.get("summary_he") or "").strip()
         if he:
             he_summaries.append((i.get("title_he") or i.get("title_en") or "", he))
+        # Telemetry.
+        total_tokens += int(ed.get("tokens_used") or 0)
+        total_cost += float(ed.get("estimated_cost_usd") or 0.0)
+        cr = ed.get("compression_ratio")
+        if cr is not None:
+            comp_sum += float(cr)
+            comp_n += 1
+        engine_counter[(ed.get("enriched_by") or "unknown").lower()] += 1
+        lang_counter[(ed.get("detected_language") or "en").lower()] += 1
+
+    avg_comp = round(comp_sum / comp_n, 1) if comp_n else 0.0
+    items_skipped = stats.get("skipped", 0) or 0
 
     # ── Build sections ──────────────────────────────────────
     sections = []
@@ -372,6 +422,68 @@ def _build_html(date_label: str, items: list, stats: dict) -> str:
                 f'<tr><td style="padding:14px 18px 16px 18px;">{he_html}</td></tr>'
                 f'</table></td></tr>'
             )
+
+    # ── A · Token-efficiency / compression stats ──
+    engine_label = ", ".join(f"{k}:{v}" for k, v in engine_counter.most_common()) or "—"
+    comp_rows = [
+        [("Items enriched", False), (str(stats["total"]), False)],
+        [("Avg compression", False), (f"{avg_comp}%", False)],
+        [("Total tokens used", False), (f"{total_tokens:,}", False)],
+        [("Estimated cost", False), (f"${total_cost:.4f}", False)],
+        [("Items skipped (quota/error)", False), (str(items_skipped), False)],
+        [("Engines", False), (engine_label, False)],
+    ]
+    sections.append(_section(
+        "⚙️ Token Efficiency",
+        _table(["Metric", "Value"], comp_rows, empty="No telemetry today."),
+        accent=_MUTED,
+    ))
+
+    # ── B · Source health ──
+    health = _fetch_source_health()
+    health_rows = []
+    for h in health:
+        ec = h.get("error_count") or 0
+        rec = "DISABLE (errors > 5)" if ec > 5 else "monitor"
+        health_rows.append([(h.get("name") or "—", False), (str(ec), False), (rec, False)])
+    sections.append(_section(
+        f"🩺 Source Health ({len(health_rows)} with errors)",
+        _table(["Source", "Errors", "Recommendation"], health_rows,
+               empty="All sources healthy — no errors recorded."),
+        accent=_SEV_COLOR["high"],
+    ))
+
+    # ── C · Contradiction alerts ──
+    contras = _fetch_contradictions(stats.get("window_start", ""), stats.get("window_end", ""))
+    if contras:
+        contra_rows = []
+        for c in contras:
+            contra_rows.append([
+                (c.get("conflict_type") or "—", False),
+                (str(c.get("old_value") or "")[:60], False),
+                (str(c.get("new_value") or "")[:60], False),
+            ])
+        contra_inner = _table(["Type", "OLD claim", "NEW claim"], contra_rows)
+    else:
+        contra_inner = f'<span style="color:{_MUTED};">No contradictions detected today.</span>'
+    sections.append(_section(
+        f"⚠️ Contradiction Alerts ({len(contras)})",
+        contra_inner,
+        accent=_SEV_COLOR["critical"],
+    ))
+
+    # ── D · Language distribution ──
+    _LANG_LABEL = {"en": "English", "ru": "Russian (translated)",
+                   "zh": "Chinese (translated)"}
+    lang_rows = []
+    for code, count in lang_counter.most_common():
+        lang_rows.append([(_LANG_LABEL.get(code, f"Other ({code})"), False),
+                          (str(count), False)])
+    sections.append(_section(
+        "🌍 Language Distribution",
+        _table(["Language", "Items"], lang_rows, empty="No items."),
+        accent=_ACCENT,
+    ))
 
     sections_html = "".join(sections)
 

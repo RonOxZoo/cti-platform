@@ -10,13 +10,25 @@ PORT = int(os.getenv('PORT', 5000))
 BROWSER_SERVICE_URL = os.getenv('BROWSER_SERVICE_URL', '')
 RENDER_SERVICE_URL = os.getenv('RENDER_SERVICE_URL', '')
 
+# ── Agent priority (PRIORITY ZERO — Claude is the primary enrichment agent) ──
+# 1. Claude  (PRIMARY)        — always tried first when ANTHROPIC_API_KEY is set.
+# 2. Gemini  (FALLBACK ONLY)  — used only when ANTHROPIC_API_KEY is absent.
+# 3. Skip with a warning      — last resort when neither key is configured.
+# This order is enforced in enrichment/gemini.py run_enrichment()/_select_agent()
+# and must not be changed: Claude is never bypassed for Gemini while its key is
+# present, even on a transient Claude error (the job stays pending instead).
+PRIMARY_AGENT = "claude"
+FALLBACK_AGENT = "gemini"
+
 # Claude (Anthropic) enrichment agent — primary enrichment engine.
 # ANTHROPIC_API_KEY is a secret; never log it or return it in an API response.
-# The model is env-overridable so it can be moved to claude-sonnet-4-6 (current
-# Sonnet) without a code change — the default below is the snapshot requested
-# for this build (note: claude-sonnet-4-20250514 is deprecated, retires 2026-06-15).
+# Model is env-overridable. Default is claude-sonnet-4-6 (current Sonnet); the
+# previous snapshot claude-sonnet-4-20250514 is deprecated and retires 2026-06-15.
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+
+# Gemini fallback model (free tier). Env-overridable.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
 # Playwright full-article fetch: when an RSS excerpt is shorter than this many
 # characters, fetch the full article via the browser service instead.

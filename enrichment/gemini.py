@@ -16,13 +16,12 @@ from datetime import datetime, timezone
 
 from google import genai
 
+from config import GEMINI_MODEL
 from database.supabase_client import client
+from enrichment.claude_agent import ClaudeCreditsError
 from notifier.telegram import send_critical_alert, notify_enrichment_complete
 
 log = logging.getLogger(__name__)
-
-# Free-tier-friendly model.
-GEMINI_MODEL = "gemini-2.0-flash"
 
 # Free-tier rate-limit protection.
 # Free tier ≈ 1500 req/day ≈ 1/min, so 15 items/run with a 5s gap is a safe
@@ -402,8 +401,17 @@ def build_intelligence_payload(job, result):
             "malware_families": malware_families,
             "c2_servers": iocs.get("c2_servers", []),
             "contradiction_note": result.get("contradiction_note"),
-            # Which engine produced this enrichment ("claude" or "gemini").
+            # ── Agent / token telemetry (PRIORITY ZERO enriched_by tracking).
+            # Claude populates all of these; Gemini sets enriched_by only and the
+            # rest fall through as None — which is the intended "fallback ran" mark.
             "enriched_by": result.get("enriched_by"),
+            "model": result.get("model"),
+            "agent_version": result.get("agent_version"),
+            "tokens_used": result.get("tokens_used"),
+            "estimated_cost_usd": result.get("estimated_cost_usd"),
+            "compression_ratio": result.get("compression_ratio"),
+            "processing_time_ms": result.get("processing_time_ms"),
+            "detected_language": result.get("detected_language"),
         },
         "gemini_processed": True,
         "processed_at": datetime.now(timezone.utc).isoformat(),
@@ -608,7 +616,9 @@ def run_enrichment(limit=50):
     """
     stats = {"processed": 0, "succeeded": 0, "failed": 0, "skipped": 0,
              "critical": 0, "high": 0, "medium": 0, "low": 0,
-             "quota_exceeded": False, "contradictions": 0, "errors": []}
+             "quota_exceeded": False, "credits_exhausted": False,
+             "contradictions": 0, "tokens_used": 0, "estimated_cost_usd": 0.0,
+             "compression_ratio_sum": 0.0, "compression_samples": 0, "errors": []}
     started_at = datetime.now(timezone.utc).isoformat()
 
     agent = _select_agent()
@@ -663,6 +673,16 @@ def run_enrichment(limit=50):
                 result = call_gemini_with_retry(build_prompt(job["title"], job["raw_content"]))
                 result["enriched_by"] = "gemini"
 
+            # Accumulate token / cost / compression telemetry (Claude path).
+            tk = result.get("tokens_used") or 0
+            if tk:
+                stats["tokens_used"] += tk
+                stats["estimated_cost_usd"] += result.get("estimated_cost_usd") or 0.0
+            cr = result.get("compression_ratio")
+            if cr is not None:
+                stats["compression_ratio_sum"] += cr
+                stats["compression_samples"] += 1
+
             # ── 2. Store the enriched item, get its id ──
             item_id = insert_intelligence_item(job, result)
 
@@ -684,6 +704,17 @@ def run_enrichment(limit=50):
                 _handle_notifications(job, result, stats)
             except Exception as notify_err:
                 log.error(f"[ENRICH] Notification step failed (non-fatal): {notify_err}")
+        except ClaudeCreditsError as e:
+            # PRIORITY ZERO: Claude is out of credits. DO NOT mark failed and DO
+            # NOT fall back to Gemini — leave the job PENDING so Claude processes
+            # it once credits are added, and stop the run cleanly.
+            log.error(f"[ENRICH] Claude credits exhausted — stopping run, job {job_id} "
+                      f"left pending. Add credits: https://console.anthropic.com/settings/billing")
+            stats["processed"] -= 1  # this job never completed
+            mark_job_pending(job_id)
+            stats["credits_exhausted"] = True
+            stats["errors"].append("Claude credits exhausted (400) — run stopped, job pending")
+            break
         except Exception as e:
             # Gemini-only: a 429 means the daily quota is gone — requeue and stop.
             if agent == "gemini" and _is_rate_limit_error(e):
@@ -701,10 +732,18 @@ def run_enrichment(limit=50):
             update_job_status(job_id, "failed", error=str(e))
             continue
 
+    # Average compression ratio across items that reported one (Claude path).
+    stats["avg_compression_ratio"] = round(
+        stats["compression_ratio_sum"] / stats["compression_samples"], 1
+    ) if stats["compression_samples"] else 0.0
+    stats["estimated_cost_usd"] = round(stats["estimated_cost_usd"], 6)
+
     log.info(
-        f"[GEMINI] Enrichment complete — processed={stats['processed']} "
+        f"[ENRICH] Enrichment complete — processed={stats['processed']} "
         f"succeeded={stats['succeeded']} failed={stats['failed']} "
-        f"skipped={stats['skipped']}"
+        f"skipped={stats['skipped']} tokens={stats['tokens_used']} "
+        f"cost=${stats['estimated_cost_usd']:.4f} "
+        f"avg_compression={stats['avg_compression_ratio']}%"
     )
 
     # Batch-complete summary notification (only sends when succeeded > 0).

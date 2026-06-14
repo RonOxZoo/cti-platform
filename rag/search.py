@@ -146,6 +146,25 @@ def _run_text_search(query: str, limit: int = 10) -> list:
     return [_sanitize_item(r) for r in rows]
 
 
+def get_items_by_ids(ids: list) -> list:
+    """Fetch + sanitize intelligence_items by id, preserving the input order.
+
+    Used by the vector-RAG path to turn matched chunk item_ids into full context
+    items. Best-effort -> [] on error.
+    """
+    ids = [i for i in (ids or []) if i]
+    if not ids:
+        return []
+    try:
+        result = (client.table("intelligence_items").select(_ITEM_COLS)
+                  .in_("id", ids).execute())
+    except Exception as e:
+        log.error(f"[RAG] get_items_by_ids failed: {e}")
+        return []
+    by_id = {r.get("id"): _sanitize_item(r) for r in (result.data or [])}
+    return [by_id[i] for i in ids if i in by_id]
+
+
 def search_intelligence(query: str, limit: int = 10) -> list:
     """Full-text search across intelligence_items.
 

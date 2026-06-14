@@ -175,15 +175,16 @@ def maybe_fetch_full_article(title, url, content, source_name):
     """
     content = content or ""
     if len(content) >= FULL_FETCH_THRESHOLD:
-        log.info(f"[FETCH] Using RSS content (sufficient length) for: {title}")
+        log.info(f"[PLAYWRIGHT] RSS content sufficient ({len(content)} chars), skipping fetch")
         return content
     if not (url and BROWSER_SERVICE_URL):
         # Can't fetch — keep whatever excerpt we have.
         return content
+    log.info(f"[PLAYWRIGHT] Full fetch triggered for: {str(title)[:60]}")
     try:
         full = fetch_via_browser_service(url, source_name)
         if full and len(full) > len(content):
-            log.info(f"[FETCH] Full article fetched via Playwright for: {title}")
+            log.info(f"[PLAYWRIGHT] Full article fetched for: {str(title)[:60]}")
             return full
     except Exception as e:
         log.warning(f"[FETCH] Full-article fetch failed for {title!r}: {str(e)[:120]}")

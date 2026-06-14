@@ -244,10 +244,12 @@ def build_user_prompt(title, content, source_name, source_category, trust_score,
 
 
 # ── DAG Step 2: the single Claude call ──
-def call_claude(user_prompt: str, max_tokens: int = MAX_TOKENS):
+def call_claude(user_prompt: str, max_tokens: int = MAX_TOKENS,
+                system_prompt: str = SYSTEM_PROMPT):
     """Call the Anthropic Messages API. Returns (text, usage_dict, stop_reason).
 
-    Error handling — see module docstring.
+    `system_prompt` defaults to the enrichment persona but can be overridden (e.g.
+    by complete_json() for report narratives). Error handling — see module docstring.
     """
     if not ANTHROPIC_API_KEY:
         raise RuntimeError("ANTHROPIC_API_KEY is not set")
@@ -264,7 +266,7 @@ def call_claude(user_prompt: str, max_tokens: int = MAX_TOKENS):
                 temperature=TEMPERATURE,
                 system=[{
                     "type": "text",
-                    "text": SYSTEM_PROMPT,
+                    "text": system_prompt,
                     "cache_control": {"type": "ephemeral"},
                 }],
                 messages=[{"role": "user", "content": user_prompt}],
@@ -312,6 +314,27 @@ def call_claude(user_prompt: str, max_tokens: int = MAX_TOKENS):
         if not text:
             raise RuntimeError("Claude returned an empty response")
         return text, usage, stop_reason
+
+
+# Generic JSON-completion system prompt (report narratives, etc.). Separate from
+# the 6-stage enrichment persona so it doesn't impose that schema.
+_GENERIC_JSON_SYSTEM = (
+    "You are a senior Cyber Threat Intelligence analyst at an Israeli SOC. "
+    "Be specific, professional, evidence-based; never fabricate IOCs or attribution. "
+    "Return ONLY one valid JSON object. No prose, no markdown fences."
+)
+
+
+def complete_json(user_prompt: str, max_tokens: int = 2500) -> dict:
+    """Single Claude call for a free-form JSON task (e.g. a report narrative).
+
+    Returns the parsed dict. Raises ClaudeCreditsError on a billing failure and
+    json.JSONDecodeError on unparseable output — callers (reporting/narrative.py)
+    catch these and fall back to Gemini / a deterministic narrative.
+    """
+    raw, _usage, _stop = call_claude(user_prompt, max_tokens=max_tokens,
+                                     system_prompt=_GENERIC_JSON_SYSTEM)
+    return json.loads(_strip_code_fences(raw))
 
 
 def _merge_usage(a: dict, b: dict) -> dict:

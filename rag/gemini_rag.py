@@ -13,7 +13,8 @@ import logging
 import time
 
 from enrichment.gemini import GEMINI_MODEL, call_gemini, _is_rate_limit_error
-from rag.search import _run_text_search, log_rag_query
+from rag.search import _run_text_search, get_items_by_ids, log_rag_query
+from rag import vector as vec
 
 log = logging.getLogger(__name__)
 
@@ -99,11 +100,25 @@ def ask_intelligence(question: str) -> dict:
         }
     question = question.strip()
 
-    # 1. Retrieve supporting context.
-    items = _run_text_search(question, limit=CONTEXT_ITEMS)
+    # 1. Retrieve supporting context — semantic (pgvector) first, keyword fallback.
+    #    Vector search returns the top-3 deduped chunks (>=0.82 cosine); we lift
+    #    those to their parent items. If pgvector/embeddings are unavailable it
+    #    returns [], and we fall back to the bounded full-text search.
+    retrieval = "vector"
+    items = []
+    try:
+        chunks = vec.vector_search(question)
+        if chunks:
+            items = get_items_by_ids([c["item_id"] for c in chunks])
+    except Exception as e:
+        log.warning(f"[RAG] vector retrieval failed, falling back to FTS: {str(e)[:160]}")
+    if not items:
+        retrieval = "fts"
+        items = _run_text_search(question, limit=CONTEXT_ITEMS)
     if not items:
         log_rag_query("ask", question, 0)
         return _no_data_response(question)
+    log.info(f"[RAG] retrieval={retrieval} items={len(items)}")
 
     # Compact source references returned to the caller (no raw rows).
     sources = [

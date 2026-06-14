@@ -1,101 +1,101 @@
 source_name,region,feed_url,ingest_method,translate_first,native_lang,category,trust_score
-Mandiant Threat Research,Global,https://www.mandiant.com/resources/blog/rss.xml,rss,false,en,global_ti,0.90
-CrowdStrike Blog,Global,https://www.crowdstrike.com/blog/feed/,rss,false,en,global_ti,0.90
-Palo Alto Unit 42,Global,https://unit42.paloaltonetworks.com/feed/,rss,false,en,global_ti,0.90
-Cisco Talos Intelligence,Global,https://blog.talosintelligence.com/rss/,rss,false,en,global_ti,0.90
-SentinelOne Labs,Global,https://www.sentinelone.com/labs/feed/,rss,false,en,global_ti,0.90
-ESET WeLiveSecurity,Global,https://www.welivesecurity.com/en/rss/feed/,rss,false,en,global_ti,0.90
-Kaspersky Securelist,Global,https://securelist.com/feed/,rss,false,en,global_ti,0.90
-Sophos News,Global,https://news.sophos.com/en-us/feed/,rss,false,en,global_ti,0.90
-Trend Micro Research,Global,https://feeds.trendmicro.com/TrendMicroResearch,rss,false,en,global_ti,0.90
-Microsoft Security Blog,Global,https://www.microsoft.com/en-us/security/blog/feed/,rss,false,en,global_ti,0.90
-Google Project Zero,Global,https://googleprojectzero.blogspot.com/feeds/posts/default,rss,false,en,research,0.90
-Recorded Future,Global,https://www.recordedfuture.com/feed,rss,false,en,global_ti,0.90
-Secureworks Research,Global,https://www.secureworks.com/rss?feed=research&category=blog,rss,false,en,global_ti,0.90
-Symantec Threat Intelligence,Global,https://symantec-enterprise-blogs.security.com/blogs/threat-intelligence/feed,rss,false,en,global_ti,0.90
-WithSecure Labs,Global,https://labs.withsecure.com/content/dam/labs/rss/rss.xml,rss,false,en,global_ti,0.90
-Group-IB Blog,Global,https://www.group-ib.com/blog/rss.xml,rss,false,en,apt,0.90
+Mandiant,Global,https://www.mandiant.com/resources/blog/rss.xml,rss,false,en,global_ti,0.9
+CrowdStrike,Global,https://www.crowdstrike.com/blog/feed/,rss,false,en,global_ti,0.9
+Palo Alto Unit 42,Global,https://unit42.paloaltonetworks.com/feed/,rss,false,en,global_ti,0.9
+Cisco Talos,Global,https://blog.talosintelligence.com/rss/,rss,false,en,global_ti,0.9
+SentinelOne Labs,Global,https://www.sentinelone.com/labs/feed/,rss,false,en,global_ti,0.9
+ESET WeLiveSecurity,Global,https://www.welivesecurity.com/en/rss/feed/,rss,false,en,global_ti,0.9
+Sophos News,Global,https://news.sophos.com/en-us/feed/,rss,false,en,global_ti,0.9
+Trend Micro Research,Global,https://feeds.trendmicro.com/TrendMicroResearch,rss,false,en,global_ti,0.9
+Microsoft MSRC,Global,https://msrc.microsoft.com/blog/feed/,rss,false,en,global_ti,0.9
+Google Project Zero,Global,https://googleprojectzero.blogspot.com/feeds/posts/default,rss,false,en,global_ti,0.9
+Recorded Future,Global,https://www.recordedfuture.com/feed,rss,false,en,global_ti,0.9
+Secureworks,Global,https://www.secureworks.com/rss?feed=research&category=blog,rss,false,en,global_ti,0.9
+BleepingComputer,Global,https://www.bleepingcomputer.com/feed/,rss,false,en,global_ti,0.8
+The Hacker News,Global,https://feeds.feedburner.com/TheHackersNews,rss,false,en,global_ti,0.8
+Dark Reading,Global,https://www.darkreading.com/rss.xml,rss,false,en,global_ti,0.8
+SecurityWeek,Global,https://www.securityweek.com/feed/,rss,false,en,global_ti,0.8
+Krebs on Security,Global,https://krebsonsecurity.com/feed/,rss,false,en,global_ti,0.85
+The Record,Global,https://therecord.media/feed/,rss,false,en,global_ti,0.8
+Wired Security,Global,https://www.wired.com/feed/category/security/latest/rss,rss,false,en,global_ti,0.8
+SC Magazine,Global,https://www.scmagazine.com/feed,rss,false,en,global_ti,0.8
+Kaspersky Securelist,Global,https://securelist.com/feed/,rss,false,en,apt,0.9
+Group-IB,Global,https://www.group-ib.com/blog/rss.xml,rss,false,en,apt,0.9
 Team Cymru,Global,https://www.team-cymru.com/blog-feed.xml,rss,false,en,apt,0.88
 ThreatConnect,Global,https://threatconnect.com/blog/feed/,rss,false,en,apt,0.85
 Anomali,Global,https://www.anomali.com/site/blog-rss,rss,false,en,apt,0.85
 Flashpoint,Global,https://flashpoint.io/feed/,rss,false,en,apt,0.85
 Intel 471,Global,https://intel471.com/blog/feed/,rss,false,en,apt,0.88
-Mandiant Threat Intelligence,Global,https://cloud.google.com/blog/topics/threat-intelligence/rss,rss,false,en,apt,0.90
-CrowdStrike Threat Intel Research,Global,https://www.crowdstrike.com/blog/category/threat-intel-research/feed/,rss,false,en,apt,0.90
-Proofpoint Threat Insight,Global,https://www.proofpoint.com/us/rss.xml,rss,false,en,apt,0.88
-Volexity,Global,https://www.volexity.com/blog/feed/,rss,false,en,apt,0.88
-Check Point Research,Israel,https://research.checkpoint.com/feed/,rss,false,en,israel,0.90
-CyberArk Blog,Israel,https://www.cyberark.com/blog/feed/,rss,false,en,israel,0.85
+Symantec Threat Intelligence,Global,https://symantec-enterprise-blogs.security.com/blogs/threat-intelligence/feed,rss,false,en,apt,0.9
+F-Secure Labs,Global,https://labs.withsecure.com/content/dam/labs/rss/rss.xml,rss,false,en,apt,0.9
+Proofpoint,Global,https://www.proofpoint.com/us/rss.xml,rss,false,en,apt,0.88
+Check Point Research,Israel,https://research.checkpoint.com/feed/,rss,false,en,israel,0.9
+CyberArk,Israel,https://www.cyberark.com/blog/feed/,rss,false,en,israel,0.85
 Sygnia,Israel,https://www.sygnia.co/feed/,rss,false,en,israel,0.85
 ClearSky Cyber Security,Israel,https://www.clearskysec.com/feed/,rss,false,en,israel,0.88
-Cybereason Blog,Israel,https://www.cybereason.com/blog/rss.xml,rss,false,en,israel,0.85
-Radware Security,Israel,https://blog.radware.com/feed/,rss,false,en,israel,0.85
-INCD Israel Advisories,Israel,https://www.gov.il/he/api/PublicationRss/national_cyber_directorate,scrape,true,he,israel,0.95
-CERT-IL,Israel,https://www.gov.il/en/departments/israel_national_cyber_directorate,scrape,true,he,israel,0.95
-Perception Point,Israel,https://perception-point.io/blog/feed/,rss,false,en,israel,0.80
-Pentera,Israel,https://pentera.io/feed/,rss,false,en,israel,0.80
-ClearSky Iran Reports,Iran,https://www.clearskysec.com/category/reports/feed/,rss,false,en,iran_nexus,0.88
-Check Point Iran Research,Iran,https://research.checkpoint.com/tag/iran/feed/,rss,false,en,iran_nexus,0.90
-Microsoft MSTIC Threat Intelligence,Iran,https://www.microsoft.com/en-us/security/blog/topic/threat-intelligence/feed/,rss,false,en,iran_nexus,0.90
-Recorded Future Research,Iran,https://www.recordedfuture.com/research/feed,rss,false,en,iran_nexus,0.90
-CISA Iran Advisories,Iran,https://www.cisa.gov/cybersecurity-advisories/all.xml,rss,false,en,iran_nexus,0.95
+Cybereason,Israel,https://www.cybereason.com/blog/rss.xml,rss,false,en,israel,0.85
+Radware,Israel,https://blog.radware.com/feed/,rss,false,en,israel,0.85
+INCD,Israel,https://www.gov.il/he/api/PublicationRss/national_cyber_directorate,scrape,true,he,israel,0.95
+Israeli CERT,Israel,https://www.gov.il/en/departments/israel_national_cyber_directorate,scrape,true,he,israel,0.95
+Check Point CPR,Israel,https://blog.checkpoint.com/feed/,rss,false,en,israel,0.88
+Team8,Israel,https://team8.vc/feed/,scrape,false,en,israel,0.8
+ClearSky Iran,Iran,https://www.clearskysec.com/category/reports/feed/,rss,false,en,iran_nexus,0.88
+Check Point Iran,Iran,https://research.checkpoint.com/tag/iran/feed/,rss,false,en,iran_nexus,0.9
+Microsoft MSTIC Iran,Iran,https://www.microsoft.com/en-us/security/blog/topic/threat-intelligence/feed/,rss,false,en,iran_nexus,0.9
+Recorded Future Iran,Iran,https://www.recordedfuture.com/research/feed,rss,false,en,iran_nexus,0.9
+CISA Iran Advisories,Iran,https://www.cisa.gov/topics/cyber-threats-and-advisories/nation-state-cyber-actors/iran,scrape,false,en,iran_nexus,0.95
 PhishTank,Global,http://data.phishtank.com/data/online-valid.xml,rss,false,en,phishing,0.75
-APWG,Global,https://apwg.org/feed/,rss,false,en,phishing,0.80
-Spamhaus News,Global,https://www.spamhaus.org/news/feed/,rss,false,en,phishing,0.80
-Malwarebytes Labs,Global,https://www.malwarebytes.com/blog/feed/index.xml,rss,false,en,phishing,0.80
+APWG,Global,https://apwg.org/feed/,rss,false,en,phishing,0.8
+Spamhaus,Global,https://www.spamhaus.org/news/feed/,rss,false,en,phishing,0.8
+Malwarebytes Labs,Global,https://www.malwarebytes.com/blog/feed/index.xml,rss,false,en,phishing,0.8
 OpenPhish,Global,https://openphish.com/feed.txt,scrape,false,en,phishing,0.75
-URLhaus Recent,Global,https://urlhaus.abuse.ch/feeds/csv_recent/,scrape,false,en,phishing,0.80
-AbuseIPDB Blog,Global,https://www.abuseipdb.com/blog/feed,rss,false,en,phishing,0.75
-ANY.RUN Blog,Global,https://any.run/cybersecurity-blog/feed/,rss,false,en,phishing,0.80
-NVD Recent CVEs,Global,https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-recent.json,scrape,false,en,cves,0.95
-CISA KEV Catalog,Global,https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json,scrape,false,en,cves,0.95
+URLhaus,Global,https://urlhaus.abuse.ch/feeds/csv_recent/,scrape,false,en,phishing,0.8
+AbuseIPDB,Global,https://www.abuseipdb.com/blog/feed,rss,false,en,phishing,0.75
+ANY.RUN,Global,https://any.run/cybersecurity-blog/feed/,rss,false,en,phishing,0.8
+CISA KEV,Global,https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json,scrape,false,en,cves,0.95
 Exploit-DB,Global,https://www.exploit-db.com/rss.xml,rss,false,en,cves,0.85
-Packet Storm Security,Global,https://rss.packetstormsecurity.com/files/,rss,false,en,cves,0.80
-Rapid7 Blog,Global,https://www.rapid7.com/blog/rss/,rss,false,en,cves,0.88
-Tenable Research Advisories,Global,https://www.tenable.com/security/feeds/tra.rss,rss,false,en,cves,0.88
-Qualys Security Blog,Global,https://blog.qualys.com/feed,rss,false,en,cves,0.88
+Packet Storm,Global,https://rss.packetstormsecurity.com/files/,rss,false,en,cves,0.8
+Rapid7,Global,https://www.rapid7.com/blog/rss/,rss,false,en,cves,0.88
+Tenable,Global,https://www.tenable.com/security/feeds/tra.rss,rss,false,en,cves,0.88
+Qualys,Global,https://blog.qualys.com/feed,rss,false,en,cves,0.88
+Snyk,Global,https://snyk.io/blog/feed/,rss,false,en,cves,0.85
+VulnDB,Global,https://vulndb.cyberriskanalytics.com/rss,scrape,false,en,cves,0.85
+NCC Group Research,Global,https://research.nccgroup.com/feed/,rss,false,en,cves,0.88
 Vulners,Global,https://vulners.com/rss.xml,scrape,false,en,cves,0.85
-Snyk Security,Global,https://snyk.io/blog/feed/,rss,false,en,cves,0.85
-Zero Day Initiative,Global,https://www.zerodayinitiative.com/rss/published/,rss,false,en,cves,0.90
-CISA ICS Advisories,Global,https://www.cisa.gov/cybersecurity-advisories/ics-advisories.xml,rss,false,en,ics,0.95
-Dragos,Global,https://www.dragos.com/blog/feed/,rss,false,en,ics,0.90
-Claroty Team82,Global,https://claroty.com/feed,rss,false,en,ics,0.88
-Nozomi Networks Labs,Global,https://www.nozominetworks.com/blog/rss.xml,rss,false,en,ics,0.88
+ICS-CERT,Global,https://www.cisa.gov/cybersecurity-advisories/ics-advisories.xml,rss,false,en,ics,0.95
+Dragos,Global,https://www.dragos.com/blog/feed/,rss,false,en,ics,0.9
+Claroty,Global,https://claroty.com/feed,rss,false,en,ics,0.88
+Nozomi Networks,Global,https://www.nozominetworks.com/blog/rss.xml,rss,false,en,ics,0.88
 Waterfall Security,Global,https://waterfall-security.com/feed/,rss,false,en,ics,0.85
-Industrial Cyber,Global,https://industrialcyber.co/feed/,rss,false,en,ics,0.80
-Kaspersky ICS-CERT,Global,https://ics-cert.kaspersky.com/rss/,rss,false,en,ics,0.88
-Fortinet Threat Research,Global,https://feeds.fortinet.com/fortinet/blog/threat-research,rss,false,en,ics,0.88
-Google Threat Analysis Group,Global,https://blog.google/threat-analysis-group/rss/,rss,false,en,research,0.90
-Microsoft Incident Response,Global,https://www.microsoft.com/en-us/security/blog/topic/incident-response/feed/,rss,false,en,research,0.90
+Kaspersky ICS,Global,https://ics-cert.kaspersky.com/rss/,rss,false,en,ics,0.88
+Fortinet ICS,Global,https://feeds.fortinet.com/fortinet/blog/threat-research,rss,false,en,ics,0.88
+Cybereason ICS,Global,https://www.cybereason.com/blog/category/research/rss.xml,rss,false,en,ics,0.85
+Google TAG,Global,https://blog.google/threat-analysis-group/rss/,rss,false,en,research,0.9
 Citizen Lab,Global,https://citizenlab.ca/feed/,rss,false,en,research,0.88
 Stanford Internet Observatory,Global,https://cyber.fsi.stanford.edu/io/rss.xml,scrape,false,en,research,0.88
-Atlantic Council New Atlanticist,Global,https://www.atlanticcouncil.org/category/blogs/new-atlanticist/feed/,rss,false,en,research,0.85
-Bellingcat,Global,https://www.bellingcat.com/feed/,rss,false,en,research,0.85
-NCC Group Research,Global,https://research.nccgroup.com/feed/,rss,false,en,research,0.88
+Atlantic Council Cyber,Global,https://www.atlanticcouncil.org/category/blogs/new-atlanticist/feed/,rss,false,en,research,0.85
+Bellingcat Tech,Global,https://www.bellingcat.com/feed/,rss,false,en,research,0.85
+Microsoft DART,Global,https://www.microsoft.com/en-us/security/blog/topic/incident-response/feed/,rss,false,en,research,0.9
 Virus Bulletin,Global,https://www.virusbulletin.com/rss,rss,false,en,research,0.88
-BleepingComputer,Global,https://www.bleepingcomputer.com/feed/,rss,false,en,global_ti,0.80
-The Hacker News,Global,https://feeds.feedburner.com/TheHackersNews,rss,false,en,global_ti,0.80
-Dark Reading,Global,https://www.darkreading.com/rss.xml,rss,false,en,global_ti,0.80
-SecurityWeek,Global,https://www.securityweek.com/feed/,rss,false,en,global_ti,0.80
-Krebs on Security,Global,https://krebsonsecurity.com/feed/,rss,false,en,global_ti,0.85
-CyberScoop,Global,https://www.cyberscoop.com/feed/,rss,false,en,global_ti,0.80
-The Record,Global,https://therecord.media/feed/,rss,false,en,global_ti,0.80
-Wired Security,Global,https://www.wired.com/feed/category/security/latest/rss,rss,false,en,global_ti,0.80
-SC Magazine,Global,https://www.scmagazine.com/feed,rss,false,en,global_ti,0.80
-Infosecurity Magazine,Global,https://www.infosecurity-magazine.com/rss/news/,rss,false,en,global_ti,0.80
-CISA Cybersecurity Alerts,USA,https://www.cisa.gov/uscert/ncas/current-activity.xml,rss,false,en,global_ti,0.95
-FBI IC3 Industry Alerts,USA,https://www.ic3.gov/Home/Rss,scrape,false,en,global_ti,0.95
+SANS ISC,Global,https://isc.sans.edu/rssfeed_full.xml,rss,false,en,research,0.88
+CISA,USA,https://www.cisa.gov/cybersecurity-advisories/all.xml,rss,false,en,global_ti,0.95
+US-CERT,USA,https://www.cisa.gov/uscert/ncas/current-activity.xml,rss,false,en,global_ti,0.95
+FBI Cyber,USA,https://www.ic3.gov/Home/Rss,scrape,false,en,global_ti,0.95
 NCSC UK,UK,https://www.ncsc.gov.uk/api/1/services/v1/all-rss-feed.xml,rss,false,en,global_ti,0.95
-ENISA News,EU,https://www.enisa.europa.eu/media/news-items/news-wire/RSS,rss,false,en,global_ti,0.95
+ENISA,EU,https://www.enisa.europa.eu/media/news-items/news-wire/RSS,rss,false,en,global_ti,0.95
 Australian ACSC,Australia,https://www.cyber.gov.au/rss/news,scrape,false,en,global_ti,0.95
 CERT-EU,EU,https://cert.europa.eu/publications/threat-intelligence-rss,rss,false,en,global_ti,0.95
-JPCERT/CC,Japan,https://www.jpcert.or.jp/rss/jpcert.rdf,rss,false,en,global_ti,0.95
-BSI CERT-Bund,Germany,https://www.bsi.bund.de/SiteGlobals/Functions/RSSFeed/RSSNewsfeed/RSSNewsfeed.xml,rss,true,de,global_ti,0.95
-Kaspersky Daily RU,Russia,https://www.kaspersky.ru/blog/feed/,rss,true,ru,global_ti,0.65
+CERT-IL,Israel,https://www.gov.il/en/api/PublicationRss/cyber_alerts,scrape,true,he,israel,0.95
+Kaspersky APT,Russia,https://securelist.ru/feed/,rss,true,ru,apt,0.65
 Group-IB Russia,Russia,https://www.group-ib.ru/blog/rss/,scrape,true,ru,apt,0.65
 Positive Technologies,Russia,https://www.ptsecurity.com/ru-ru/rss/,scrape,true,ru,global_ti,0.65
 BI.ZONE,Russia,https://bi.zone/rss/,scrape,true,ru,global_ti,0.65
-Qihoo 360 Netlab,China,https://blog.netlab.360.com/rss/,rss,true,zh,global_ti,0.65
+Qihoo 360,China,https://blog.netlab.360.com/rss/,rss,true,zh,global_ti,0.65
 Antiy Labs,China,https://www.antiy.com/rss.xml,scrape,true,zh,global_ti,0.65
-NSFOCUS,China,https://nsfocusglobal.com/feed/,rss,true,zh,global_ti,0.65
-Sangfor Blog,China,https://www.sangfor.com/blog/rss,scrape,true,zh,global_ti,0.65
+NSFocus,China,https://nsfocusglobal.com/feed/,rss,true,zh,global_ti,0.65
+Sangfor,China,https://www.sangfor.com/blog/rss,scrape,true,zh,global_ti,0.65
+CyberScoop,Global,https://www.cyberscoop.com/feed/,rss,false,en,global_ti,0.8
+Infosecurity Magazine,Global,https://www.infosecurity-magazine.com/rss/news/,rss,false,en,global_ti,0.8
+ZDNet Security,Global,https://www.zdnet.com/topic/security/rss.xml,rss,false,en,global_ti,0.8
+CSO Online,Global,https://www.csoonline.com/feed/,rss,false,en,global_ti,0.8
+Graham Cluley,Global,https://grahamcluley.com/feed/,rss,false,en,global_ti,0.75

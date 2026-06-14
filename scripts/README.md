@@ -148,6 +148,26 @@ Creates the stricter `feed_sources` table (CHECK constraints on
 
 ---
 
+## 7. Semantic RAG vector store — `sql/enable_pgvector.sql` + `scripts/index_vectors.py`
+
+Enables pgvector semantic retrieval for `/ask` (Pillar 3). `/ask` uses vector
+search first (top-3 chunks, cosine ≥ 0.82) and falls back to full-text search
+when the store is empty/unavailable — so this is optional but improves answers.
+
+1. Apply `sql/enable_pgvector.sql` in the Supabase SQL Editor (creates the
+   `vector` extension, `intel_chunks`, the ivfflat index, and
+   `match_intel_chunks()`).
+2. Ensure `GEMINI_API_KEY` is set (embeddings via `gemini-embedding-001`, 768-dim).
+3. Populate / refresh the store (opt-in batch — not run inline with enrichment so
+   it doesn't burn the Gemini quota):
+   ```powershell
+   python -m scripts.index_vectors --days 14 --limit 500
+   ```
+   Re-running only re-embeds changed chunks. Old chunks are pruned automatically
+   when their parent `intelligence_items` row is removed (ON DELETE CASCADE).
+
+---
+
 ## Other scripts
 
 - `scripts/migrate_cisa_kev.py` — one-off: switch CISA from its RSS advisories

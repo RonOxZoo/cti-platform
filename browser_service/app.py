@@ -157,8 +157,51 @@ def log_to_supabase(source_name: str, domain: str, status: str, error: str = "")
         log.error("[BROWSER] Failed to write ingestion_log: %s", e)
 
 
+# ── Playwright optimization (Pillar 2) ───────────────────────
+# Resource types that never carry article text — blocked to cut bandwidth, speed
+# up load, and let networkidle settle quickly.
+_BLOCKED_RESOURCE_TYPES = {"image", "media", "font", "stylesheet"}
+
+# Ad / analytics / tracker hosts — blocked by substring match on the request URL.
+_BLOCKED_URL_SUBSTRINGS = (
+    "googlesyndication", "doubleclick", "google-analytics", "googletagmanager",
+    "googletagservices", "adservice", "adsystem", "/ads/", "/ad/", "adnxs",
+    "facebook.net", "connect.facebook", "scorecardresearch", "quantserve",
+    "taboola", "outbrain", "criteo", "amazon-adsystem", "hotjar", "mixpanel",
+    "segment.io", "cdn.segment", "fullstory", "optimizely", "newrelic",
+)
+
+# Semantic containers, in priority order — the article body lives in one of these
+# on virtually every news/blog CMS. We return the first that yields real text.
+_CONTENT_SELECTORS = (
+    "article", "main", "[role='main']", ".post-content", "#entry-content",
+    ".entry-content", ".article-content", ".article-body", "#content",
+    ".post-body", ".td-post-content",
+)
+
+# Hard cap on time spent on a single page (Pillar 2 / Pillar 6).
+_NAV_TIMEOUT_MS = 30000
+
+
+def _should_block(route) -> bool:
+    req = route.request
+    if req.resource_type in _BLOCKED_RESOURCE_TYPES:
+        return True
+    u = (req.url or "").lower()
+    return any(s in u for s in _BLOCKED_URL_SUBSTRINGS)
+
+
 def render_page(url: str) -> str:
-    """Fetch a URL with a stealth headless Chromium browser."""
+    """Fetch a URL with a stealth headless Chromium browser (Pillar 2).
+
+    Optimizations:
+      - Blocks images/fonts/CSS/media + ad/tracker hosts (less bandwidth, faster
+        networkidle).
+      - Returns the innerHTML of the first matching SEMANTIC container
+        (article/main/.post-content/#entry-content/…) so the downstream
+        compressor gets the article body, not nav/footer chrome.
+      - Hard 30s navigation timeout; browser always closed in `finally`.
+    """
     from playwright.sync_api import sync_playwright
 
     content = ""
@@ -182,7 +225,12 @@ def render_page(url: str) -> str:
                 },
                 user_agent=random.choice(USER_AGENTS),
             )
+            # Block all non-content resources before any navigation.
+            context.route("**/*", lambda route: route.abort()
+                          if _should_block(route) else route.continue_())
+
             page = context.new_page()
+            page.set_default_navigation_timeout(_NAV_TIMEOUT_MS)
             page.add_init_script(
                 "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
             )
@@ -191,12 +239,30 @@ def render_page(url: str) -> str:
                 "Accept-Language": "en-US,en;q=0.9",
                 "Accept-Encoding": "gzip, deflate, br",
             })
-            page.goto(url, wait_until="networkidle", timeout=30000)
-            time.sleep(random.uniform(2, 5))
             try:
-                content = page.content()
+                page.goto(url, wait_until="networkidle", timeout=_NAV_TIMEOUT_MS)
             except Exception:
-                content = page.inner_text("body")
+                # networkidle can time out on chatty pages even with blocking —
+                # fall back to DOM-ready content rather than failing the fetch.
+                page.goto(url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT_MS)
+            time.sleep(random.uniform(1, 2))
+
+            # Prefer a semantic container; fall back to full page / body text.
+            for sel in _CONTENT_SELECTORS:
+                try:
+                    node = page.query_selector(sel)
+                    if node:
+                        html = node.inner_html()
+                        if html and len(html) > 200:
+                            content = html
+                            break
+                except Exception:
+                    continue
+            if not content:
+                try:
+                    content = page.content()
+                except Exception:
+                    content = page.inner_text("body")
             if not content:
                 content = page.inner_text("body")
         finally:

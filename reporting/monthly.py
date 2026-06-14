@@ -19,7 +19,8 @@ from collections import Counter
 from datetime import datetime, timezone
 
 from database.supabase_client import client
-from enrichment.gemini import call_gemini, _is_rate_limit_error, _is_missing_column_error
+from enrichment.gemini import _is_missing_column_error
+from reporting.narrative import generate_narrative
 from reporting.weekly import _fetch_window, _aggregate, _prior_actor_set, _prose
 from reporting.daily import (
     _esc, _norm_sev, _section, _table, _kv_chips, _events_block,
@@ -163,17 +164,12 @@ def _gemini_narrative(stats: dict, agg: dict, prev: dict, weekly_rows: list) -> 
         "weekly_reports": weekly_ctx,
     }
     prompt = f"{_MONTHLY_NARRATIVE_PROMPT}\n\n=== MONTHLY DATA ===\n{json.dumps(data, ensure_ascii=False)[:14000]}\n"
-    try:
-        result = call_gemini(prompt)
-        if isinstance(result, dict) and result.get("executive_summary_en"):
-            merged = _fallback_narrative(stats, agg, prev)
-            merged.update({k: v for k, v in result.items() if v})
-            return merged
-    except Exception as e:
-        if _is_rate_limit_error(e):
-            log.warning("[MONTHLY] Gemini quota reached — using deterministic narrative.")
-        else:
-            log.error(f"[MONTHLY] narrative generation failed: {e}")
+    # Claude primary, Gemini fallback (PRIORITY ZERO); None -> deterministic.
+    result = generate_narrative(prompt)
+    if isinstance(result, dict) and result.get("executive_summary_en"):
+        merged = _fallback_narrative(stats, agg, prev)
+        merged.update({k: v for k, v in result.items() if v})
+        return merged
     return _fallback_narrative(stats, agg, prev)
 
 

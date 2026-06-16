@@ -555,7 +555,11 @@ def generate_daily_report(date: str = None) -> dict:
     tables, and a Hebrew (RTL) summary section. Always returns a report — a
     "quiet day" report when no items are found.
 
-    Returns: {"html": "...", "stats": {...}}
+    Returns: {"html": "...", "stats": {...}, "items": [...]}
+
+    The raw ``items`` are returned alongside the HTML so the Telegram daily
+    brief (notifier.telegram.send_daily_summary) can render per-item lines
+    without re-querying Supabase.
     """
     start_iso, end_iso, date_label = _day_bounds(date)
     items = _fetch_items(start_iso, end_iso)
@@ -577,4 +581,4 @@ def generate_daily_report(date: str = None) -> dict:
     html_doc = _build_html(date_label, items, stats)
     log.info(f"[REPORT] Daily report generated — {date_label} total={stats['total']} "
              f"critical={stats['critical']} high={stats['high']}")
-    return {"html": html_doc, "stats": stats}
+    return {"html": html_doc, "stats": stats, "items": items}

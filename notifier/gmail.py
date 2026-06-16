@@ -102,23 +102,19 @@ def _sev(stats: dict, key: str) -> int:
 
 # ── Public API ───────────────────────────────────────────────
 def send_daily_report(report_html: str, stats: dict) -> bool:
-    """Send the daily CTI intelligence report as an HTML email.
+    """DISABLED — the daily brief is delivered via Telegram ONLY.
 
-    Subject: CTI Daily Brief — [DATE] — [N] Critical / [N] High Items
+    Routing policy (do not change without updating main.py / notifier.telegram):
+      • Daily            → Telegram only (no Gmail)
+      • Critical alerts  → Telegram immediately (no Gmail)
+      • Weekly / Monthly → Gmail (full HTML) + Telegram (condensed summary)
+
+    Kept as a logged no-op (returns False) so any existing caller keeps working
+    without sending an email. The full daily brief is sent by
+    notifier.telegram.send_daily_summary().
     """
-    stats = stats or {}
-    date = stats.get("date") or _today_str()
-    critical = _sev(stats, "critical")
-    high = _sev(stats, "high")
-    subject = f"CTI Daily Brief — {date} — {critical} Critical / {high} High Items"
-
-    text = (
-        f"CTI Daily Brief — {date}\n"
-        f"Critical: {critical} | High: {high} | Medium: {_sev(stats, 'medium')}\n"
-        f"Total items: {stats.get('total', 0)}\n\n"
-        "This report is best viewed in an HTML-capable mail client."
-    )
-    return _send(subject, html=report_html, text=text)
+    log.info("[GMAIL] send_daily_report skipped — daily goes to Telegram only")
+    return False
 
 
 def send_weekly_report(report_html: str, stats: dict) -> bool:

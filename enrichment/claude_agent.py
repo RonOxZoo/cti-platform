@@ -53,9 +53,11 @@ from utils.text_compressor import compress_for_llm, extract_ioc_hints, detect_la
 
 log = logging.getLogger(__name__)
 
-# Output budget — see module docstring for why this is 4000, not 1500.
-MAX_TOKENS = 4000
-MAX_TOKENS_RETRY = 6000      # bumped cap if Claude still stops on max_tokens
+# Output budget — see module docstring for why this is well above 1500. The
+# expert format (5 EN paragraphs + 5 HE paragraphs + full 6-stage JSON) is
+# materially longer than the old 5-7 sentence summary, so the cap is 5000.
+MAX_TOKENS = 5000
+MAX_TOKENS_RETRY = 7000      # bumped cap if Claude still stops on max_tokens
 TEMPERATURE = 0
 AGENT_VERSION = "2.0"
 
@@ -155,8 +157,16 @@ STAGE 5 TREND: domain_density_alert, velocity_shift_detected, cross_channel_cve_
 STAGE 6 META: parsing_inefficiency_logged, schema_evolution_recommendation (null or one sentence).
 israel_relevance=true ONLY IF Israeli org targeted OR INCD advisory.
 iran_nexus=true ONLY IF Iranian APT named OR IRGC linked.
-summary_en: 5-7 professional sentences (what/who/targeted/TTPs/impact/action).
-summary_he: identical in professional Hebrew with correct terminology.
+summary_en: EXACTLY 5 plain-prose paragraphs separated by a BLANK LINE (no "P1"/
+heading labels, no bullet markers), in THIS exact order:
+(1) INCIDENT: what happened — exact attack vector, exploit method, date, affected product.
+(2) ATTRIBUTION: actor name, aliases, country, sponsoring org, confidence level, prior operations by the same actor.
+(3) EXECUTION: step-by-step attack chain using MITRE IDs; tools, malware, C2 infrastructure; initial access -> persistence -> lateral movement -> objective.
+(4) IMPACT: who was targeted — sectors, countries, scale, business impact.
+(5) DEFENSE: specific actions defenders take NOW — patch versions, IOCs to block, detection rules, config changes, in priority order.
+summary_he: the SAME 5 paragraphs in professional Hebrew, separated by a BLANK
+LINE, using this terminology where relevant: גורם איום, פרצת אבטחה, תוכנת כופר,
+תקיפת סייבר, מודיעין איומים, תשתית קריטית, קמפיין תקיפה, סממן פשרה, תוכנה זדונית, דיוג.
 Return this exact JSON structure, nothing else:"""
 
 _EMPTY_IOCS = {

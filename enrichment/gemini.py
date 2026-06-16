@@ -562,6 +562,7 @@ def _log_quota_exceeded(started_at, items_processed):
 def _build_alert_item(job, result):
     """Assemble the dict consumed by notifier.send_critical_alert()."""
     iocs = result.get("iocs", {}) or {}
+    countries = result.get("targeted_countries", []) or []
     return {
         "severity": result.get("severity"),
         "source": result.get("category") or "OSINT",
@@ -569,11 +570,14 @@ def _build_alert_item(job, result):
         "confidence": result.get("confidence"),
         "category": result.get("category"),
         "actors": result.get("actors", []),
+        "country": countries[0] if countries else None,
+        "targeted_countries": countries,
         "cves": result.get("cves", []),
         "mitre": result.get("mitre_techniques", []),
         # Flatten hashes so the alert can render them inside <code> blocks.
         "iocs": iocs,
         "summary_en": result.get("summary_en"),
+        "model": result.get("model"),
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     }
 

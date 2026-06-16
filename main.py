@@ -62,7 +62,7 @@ def root():
         "version": "1.1.0",
         "endpoints": ["/health", "/ingest", "/enrich", "/cleanup", "/status",
                       "/feeds/health", "/ask", "/search", "/trending",
-                      "/notify/test", "/notify/daily",
+                      "/notify/test", "/notify/daily", "/notify/critical",
                       "/report/daily", "/report/preview",
                       "/report/weekly", "/report/weekly/preview",
                       "/report/monthly", "/report/monthly/preview"]
@@ -486,54 +486,30 @@ def notify_test():
 
 @app.route("/notify/daily", methods=["POST"])
 def notify_daily():
-    """Auth-protected — compute last-24h stats and send the daily summary."""
+    """Auth-protected — build the last-24h daily brief and send it to Telegram.
+
+    Routing policy: the daily brief goes to Telegram ONLY. Delegates to the
+    daily report generator so the brief carries full per-item detail (the same
+    items the /report/daily brief uses)."""
     if not verify_key(request):
         log.warning("[NOTIFY] Unauthorized request blocked")
         return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
 
-    from database.supabase_client import client
     from notifier.telegram import send_daily_summary
-    from rag.search import get_trending_actors, get_trending_cves
 
-    now = datetime.now(timezone.utc)
-    cutoff = (now - timedelta(hours=24)).isoformat()
-
-    def safe_count(fn, default=0):
-        try:
-            return fn() or 0
-        except Exception as e:
-            log.warning(f"[NOTIFY] daily metric unavailable: {str(e)[:120]}")
-            return default
-
-    def sev_count(labels):
-        return safe_count(lambda: client.table("intelligence_items")
-                          .select("id", count="exact")
-                          .in_("severity", labels)
-                          .gte("processed_at", cutoff)
-                          .execute().count)
+    date = None
+    if request.is_json and request.json:
+        date = request.json.get("date") or None
 
     try:
-        sources_processed = len(get_active_sources())
-    except Exception:
-        sources_processed = 0
+        from reporting.daily import generate_daily_report
+        report = generate_daily_report(date)
+    except Exception as e:
+        log.error(f"[NOTIFY] daily brief generation failed: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
-    stats = {
-        "date": now.strftime("%Y-%m-%d"),
-        "sources_processed": sources_processed,
-        "items_ingested": safe_count(lambda: client.table("raw_items")
-                                     .select("id", count="exact")
-                                     .gte("ingested_at", cutoff).execute().count),
-        "items_enriched": safe_count(lambda: client.table("intelligence_items")
-                                     .select("id", count="exact")
-                                     .gte("processed_at", cutoff).execute().count),
-        "critical": sev_count(["Critical", "critical", "CRITICAL"]),
-        "high": sev_count(["High", "high", "HIGH"]),
-        "medium": sev_count(["Medium", "medium", "MEDIUM"]),
-        "top_actors": get_trending_actors(days=1),
-        "top_cves": get_trending_cves(days=1),
-    }
-
-    sent = send_daily_summary(stats)
+    stats = report["stats"]
+    sent = send_daily_summary({**stats, "items": report.get("items", [])})
     return jsonify({
         "status": "success" if sent else "error",
         "sent": sent,
@@ -541,15 +517,44 @@ def notify_daily():
     }), (200 if sent else 502)
 
 
+@app.route("/notify/critical", methods=["POST"])
+def notify_critical():
+    """Auth-protected — push a CRITICAL threat alert to Telegram immediately.
+
+    Routing policy: critical alerts go to Telegram ONLY (no Gmail). The request
+    body is the alert item itself, or {"item": {...}}; it should carry the
+    enrichment fields (title, source, category, actors/actor, targeted_countries/
+    country, severity, confidence, summary_en [5 paragraphs], iocs, cves,
+    mitre, model). Delivery is best-effort and never raises.
+    """
+    if not verify_key(request):
+        log.warning("[NOTIFY] Unauthorized request blocked")
+        return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
+
+    body = request.json if request.is_json else None
+    body = body or {}
+    item = body.get("item") if isinstance(body.get("item"), dict) else body
+    if not item:
+        return jsonify({"error": "Missing alert item in request body"}), 400
+
+    from notifier.telegram import send_critical_alert
+    sent = send_critical_alert(item)
+    return jsonify({
+        "status": "success" if sent else "error",
+        "channel": "telegram",
+        "sent": sent,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }), (200 if sent else 502)
+
+
 # ── Gmail intelligence report endpoints ──────────────────────
 @app.route("/report/daily", methods=["POST"])
 def report_daily():
-    """Auth-protected — generate the daily report, email it, and post a
-    Telegram summary.
+    """Auth-protected — generate the daily brief and post it to Telegram.
 
-    The report is always generated (a "quiet day" report when there are no
-    items). Email and Telegram delivery are best-effort: a failure in either is
-    reported in the response but never raises.
+    Routing policy: the DAILY brief goes to Telegram ONLY (never Gmail). The
+    report is always generated (a "quiet day" brief when there are no items);
+    Telegram delivery is best-effort and never raises.
     """
     if not verify_key(request):
         log.warning("[REPORT] Unauthorized request blocked")
@@ -564,46 +569,35 @@ def report_daily():
         report = generate_daily_report(date)
     except Exception as e:
         log.error(f"[REPORT] Daily report generation failed: {e}")
-        # Best-effort: alert via email so a silent failure doesn't go unnoticed.
+        # Best-effort: alert via Telegram (daily is Telegram-only) so a silent
+        # failure doesn't go unnoticed.
         try:
-            from notifier.gmail import send_error_alert
+            from notifier.telegram import send_error_alert
             send_error_alert("report/daily", str(e))
         except Exception:
             pass
         return jsonify({"status": "error", "message": str(e)}), 500
 
-    html_report = report["html"]
     stats = report["stats"]
+    items = report.get("items", [])
 
-    # ── Email delivery (never let a send failure crash the request) ──
-    email_sent = False
-    try:
-        from notifier.gmail import send_daily_report
-        email_sent = send_daily_report(html_report, stats)
-    except Exception as e:
-        log.error(f"[REPORT] Email send raised: {e}")
-
-    # ── Telegram summary (best-effort) ──
+    # ── Telegram-only delivery: send the FULL daily brief ──
     telegram_sent = False
     try:
         from notifier.telegram import send_daily_summary
-        telegram_sent = send_daily_summary({
-            "date": stats.get("date"),
-            "items_enriched": stats.get("total", 0),
-            "critical": stats.get("critical", 0),
-            "high": stats.get("high", 0),
-            "medium": stats.get("medium", 0),
-        })
+        telegram_sent = send_daily_summary({**stats, "items": items})
     except Exception as e:
-        log.error(f"[REPORT] Telegram summary raised: {e}")
+        log.error(f"[REPORT] Telegram daily brief raised: {e}")
 
     return jsonify({
-        "status": "sent" if email_sent else "error",
-        "email_sent": email_sent,
+        "status": "sent" if telegram_sent else "error",
+        "channel": "telegram",
+        # Daily is Telegram-only by routing policy — Gmail is never used here.
+        "email_sent": False,
         "telegram_sent": telegram_sent,
         "stats": stats,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-    }), (200 if email_sent else 502)
+    }), (200 if telegram_sent else 502)
 
 
 @app.route("/report/preview", methods=["GET"])

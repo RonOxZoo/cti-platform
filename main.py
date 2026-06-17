@@ -375,11 +375,8 @@ def enrich_status():
             return None
 
     counts = {s: count(s) for s in ("pending", "in_progress", "done", "failed")}
-    return jsonify({
-        "status": "ok",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "jobs": counts,
-    }), 200
+    counts["total"] = sum(v for v in counts.values() if v is not None)
+    return jsonify(counts), 200
 
 
 # ── RAG endpoints ────────────────────────────────────────────

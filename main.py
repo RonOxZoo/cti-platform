@@ -60,7 +60,8 @@ def root():
         "service": "CTI Platform",
         "status": "online",
         "version": "1.1.0",
-        "endpoints": ["/health", "/ingest", "/enrich", "/cleanup", "/status",
+        "endpoints": ["/health", "/ingest", "/enrich", "/enrich/status",
+                      "/cleanup", "/status",
                       "/feeds/health", "/ask", "/search", "/trending",
                       "/notify/test", "/notify/daily", "/notify/critical",
                       "/report/daily", "/report/preview",
@@ -355,6 +356,29 @@ def enrich():
         "status": "success",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         **stats
+    }), 200
+
+
+@app.route("/enrich/status", methods=["GET"])
+def enrich_status():
+    """No-auth — processing_jobs queue counts so progress can be checked
+    without triggering a new enrichment run."""
+    from database.supabase_client import client
+
+    def count(status):
+        try:
+            return (client.table("processing_jobs")
+                    .select("id", count="exact")
+                    .eq("status", status).execute().count) or 0
+        except Exception as e:
+            log.warning(f"[ENRICH/STATUS] count({status}) unavailable: {str(e)[:120]}")
+            return None
+
+    counts = {s: count(s) for s in ("pending", "in_progress", "done", "failed")}
+    return jsonify({
+        "status": "ok",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "jobs": counts,
     }), 200
 
 

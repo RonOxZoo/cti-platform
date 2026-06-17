@@ -23,11 +23,12 @@ from notifier.telegram import send_critical_alert, notify_enrichment_complete
 
 log = logging.getLogger(__name__)
 
-# Free-tier rate-limit protection.
-# Free tier ≈ 1500 req/day ≈ 1/min, so 15 items/run with a 5s gap is a safe
-# batch size that won't blow the per-minute or daily budget in one run.
+# Free-tier rate-limit protection + request-timeout protection.
+# Claude takes ~20-30s per item, so 5 items ≈ 2.5 min, which fits inside any
+# reasonable HTTP/platform timeout. The daily Make scenario calls /enrich
+# multiple times, so 5 items per call still drains the queue across the day.
 CALL_DELAY_SECONDS = 5        # delay between consecutive Gemini calls
-MAX_ITEMS_PER_RUN = 15        # hard cap on items processed per /enrich call
+MAX_ITEMS_PER_RUN = 5         # hard cap on items processed per /enrich call
 
 # ingestion_logs scenario name used to record enrichment quota state. Kept
 # distinct from the RSS scenario so RSS runs don't overwrite the quota marker.

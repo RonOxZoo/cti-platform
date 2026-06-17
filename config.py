@@ -7,7 +7,7 @@ SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 API_SECRET_KEY = os.getenv('API_SECRET_KEY', 'cti-platform-secret-2024')
 PORT = int(os.getenv('PORT', 5000))
-BROWSER_SERVICE_URL = os.getenv('BROWSER_SERVICE_URL', '')
+BROWSER_SERVICE_URL = os.getenv('BROWSER_SERVICE_URL', 'https://cti-browser-service.onrender.com')
 RENDER_SERVICE_URL = os.getenv('RENDER_SERVICE_URL', '')
 
 # ── Agent priority (PRIORITY ZERO — Claude is the primary enrichment agent) ──

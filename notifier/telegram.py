@@ -240,7 +240,24 @@ def _fmt_top(entries, empty: str = "—") -> str:
 _DAILY_CRIT_CAP = 12
 _DAILY_HIGH_CAP = 12
 _DAILY_REGION_CAP = 10
-_DAILY_HE_CAP = 3
+# How many items get a written summary, in each language.
+_DAILY_SUMMARY_CAP = 3
+# Per-item, per-language excerpt length. The full expert summary is 5 paragraphs
+# (~900 chars Hebrew / ~1300 English, up to ~4200), so printing whole summaries
+# for 3 items in 2 languages would blow past Telegram's 4096-char hard limit and
+# get truncated mid-sentence. We show the first paragraph (INCIDENT — what
+# happened), trimmed, which is the "what this is about" line.
+_DAILY_EXCERPT_CHARS = 220
+
+
+def _excerpt(text: str, limit: int = _DAILY_EXCERPT_CHARS) -> str:
+    """First paragraph of an expert summary, whitespace-collapsed and trimmed."""
+    first = " ".join(_split_5(text)[0].split())
+    if first in ("", "—"):
+        return ""
+    if len(first) > limit:
+        first = first[: limit - 1].rstrip() + "…"
+    return first
 
 
 def _item_title(item: dict) -> str:
@@ -358,21 +375,32 @@ def send_daily_summary(stats: dict) -> bool:
     parts.append(f"👤 <b>ACTORS:</b> {_fmt_top(actors)}")
     parts.append(f"🔑 <b>CVEs:</b> {_code_list(cves, empty='None')}")
 
-    # Hebrew summary of the top 3 items (critical first, then high, then rest).
+    # Bilingual summaries of the top items (critical first, then high, then rest).
+    # Each bullet leads with the item's subject in English so the reader knows
+    # what the entry is about before the body text, then the body in that
+    # section's language.
     ranked = critical + high + medium + [
         i for i in items if i not in critical and i not in high and i not in medium
     ]
-    he_bits = []
-    for i in ranked:
-        he = (i.get("summary_he") or "").strip()
+    he_bits, en_bits = [], []
+    for i in ranked[:_DAILY_SUMMARY_CAP]:
+        subject = _esc(_item_title(i))
+        he = _excerpt(i.get("summary_he") or "")
+        en = _excerpt(i.get("summary_en") or "")
         if he:
-            he_bits.append(f"• {_esc(defang_all(he))}")
-        if len(he_bits) >= _DAILY_HE_CAP:
-            break
+            he_bits.append(f"• <b>{subject}</b>\n{_esc(defang_all(he))}")
+        if en:
+            en_bits.append(f"• <b>{subject}</b>\n{_esc(defang_all(en))}")
+
     if he_bits:
         parts.append(_SEP)
-        parts.append("🇮🇱 <b>סיכום עברי:</b>")
-        parts.append("\n".join(he_bits))
+        parts.append("🇮🇱 <b>סיכום בעברית:</b>")
+        parts.append("\n\n".join(he_bits))
+
+    if en_bits:
+        parts.append(_SEP)
+        parts.append("🇬🇧 <b>English Summary:</b>")
+        parts.append("\n\n".join(en_bits))
 
     parts.append(_SEP)
     parts.append(f"🤖 CTI Platform | Claude {_esc(model or '—')}")

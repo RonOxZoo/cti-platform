@@ -378,6 +378,11 @@ def build_intelligence_payload(job, result):
 
     return {
         "raw_item_id": job["raw_item_id"],
+        # Carry the source article's title across from raw_items. The enrichment
+        # agents don't emit a title of their own, so without this every row lands
+        # with title_en NULL and renders as "(untitled)" in the Telegram brief
+        # and reports.
+        "title_en": (job.get("title") or "").strip() or None,
         "severity": result.get("severity"),
         "severity_rationale": result.get("severity_reason"),
         "confidence_score": confidence,

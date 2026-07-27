@@ -591,15 +591,13 @@ def _handle_notifications(job, result, stats):
 
     Alert rules:
       - every CRITICAL item -> immediate alert
-      - every HIGH item with israel_relevance=True -> immediate alert
+      - every HIGH item -> immediate alert
     """
     severity = (result.get("severity") or "").strip().lower()
     if severity in ("critical", "high", "medium", "low"):
         stats[severity] += 1
 
-    if severity == "critical":
-        send_critical_alert(_build_alert_item(job, result))
-    elif severity == "high" and bool(result.get("israel_relevance", False)):
+    if severity in ("critical", "high"):
         send_critical_alert(_build_alert_item(job, result))
 
 

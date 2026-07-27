@@ -568,6 +568,40 @@ def notify_critical():
     }), (200 if sent else 502)
 
 
+# ── Interactive Telegram bot webhook ─────────────────────────
+@app.route("/telegram/webhook", methods=["POST"])
+def telegram_webhook():
+    """Receives updates from Telegram for the interactive (button) bot.
+
+    Auth is Telegram's own secret-token header, not X-API-Key: Telegram sends
+    the value registered via setWebhook's secret_token parameter. When
+    TELEGRAM_WEBHOOK_SECRET is unset the check is skipped, so the bot still
+    works before the secret is configured (the URL is unguessable but this is
+    weaker — set the secret in production).
+
+    Always returns 200: a non-200 makes Telegram retry the same update in a
+    loop, which would spam the chat once the underlying issue clears.
+    """
+    secret = os.getenv("TELEGRAM_WEBHOOK_SECRET")
+    if secret:
+        sent = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not hmac.compare_digest(sent, secret):
+            log.warning("[BOT] Webhook call with bad secret token blocked")
+            return jsonify({"ok": True}), 200
+
+    update = request.json if request.is_json else None
+    if not update:
+        return jsonify({"ok": True}), 200
+
+    try:
+        from notifier.bot import handle_update
+        handle_update(update)
+    except Exception as e:
+        log.error(f"[BOT] webhook dispatch failed: {str(e)[:300]}")
+
+    return jsonify({"ok": True}), 200
+
+
 # ── Gmail intelligence report endpoints ──────────────────────
 @app.route("/report/daily", methods=["POST"])
 def report_daily():

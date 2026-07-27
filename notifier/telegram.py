@@ -244,20 +244,47 @@ _DAILY_REGION_CAP = 10
 _DAILY_SUMMARY_CAP = 3
 # Per-item, per-language excerpt length. The full expert summary is 5 paragraphs
 # (~900 chars Hebrew / ~1300 English, up to ~4200), so printing whole summaries
-# for 3 items in 2 languages would blow past Telegram's 4096-char hard limit and
-# get truncated mid-sentence. We show the first paragraph (INCIDENT — what
-# happened), trimmed, which is the "what this is about" line.
-_DAILY_EXCERPT_CHARS = 220
+# for 3 items in 2 languages would blow past Telegram's 4096-char hard limit.
+# We show the opening paragraph (INCIDENT — what happened), cut to whole
+# sentences, which is the "what this is about" line.
+_DAILY_EXCERPT_CHARS = 300
+
+
+def _trim_to_sentence(text: str, limit: int) -> str:
+    """Trim `text` to at most `limit` chars WITHOUT cutting mid-sentence.
+
+    Keeps as many complete sentences as fit, so the reader always gets a
+    finished thought rather than a dangling "…". Only if the very first
+    sentence alone exceeds the limit do we fall back to a word-boundary cut.
+    """
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+
+    # Walk sentence endings (. ! ? — same punctuation in Hebrew) and keep the
+    # longest run of whole sentences that still fits.
+    end = 0
+    for i, ch in enumerate(text):
+        if ch in ".!?" and (i + 1 >= len(text) or text[i + 1] in " \n"):
+            if i + 1 <= limit:
+                end = i + 1
+            else:
+                break
+    if end:
+        return text[:end].strip()
+
+    # Single over-long sentence: cut on a word boundary so we at least never
+    # split a word in half.
+    cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:")
+    return (cut or text[:limit].rstrip()) + "…"
 
 
 def _excerpt(text: str, limit: int = _DAILY_EXCERPT_CHARS) -> str:
-    """First paragraph of an expert summary, whitespace-collapsed and trimmed."""
+    """First paragraph of an expert summary, collapsed and sentence-trimmed."""
     first = " ".join(_split_5(text)[0].split())
     if first in ("", "—"):
         return ""
-    if len(first) > limit:
-        first = first[: limit - 1].rstrip() + "…"
-    return first
+    return _trim_to_sentence(first, limit)
 
 
 def _item_title(item: dict) -> str:

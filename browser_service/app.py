@@ -35,7 +35,11 @@ USER_AGENTS = [
 ]
 
 # --- Rate limiting state (in-memory, per-IP rolling window) ---
-RATE_LIMIT_MAX = 10
+# Fetches from cti-platform are strictly sequential (one Chromium instance at a
+# time, closed before the next), so this isn't protecting against concurrent
+# load — it was simply too tight for a single ingestion run, which can need the
+# fallback for a dozen-plus sources back-to-back and was self-triggering 429s.
+RATE_LIMIT_MAX = 30
 RATE_LIMIT_WINDOW = 60  # seconds
 _rate_buckets = defaultdict(deque)
 

@@ -25,6 +25,52 @@ log = logging.getLogger(__name__)
 LOOKBACK_HOURS = 24
 FEED_TIMEOUT = 25
 
+# Feeds larger than this are rejected without being parsed.
+#
+# This is the guard that keeps the daily run alive. feedparser/lxml build a
+# document tree several times the size of the source text, so one oversized
+# feed can spike memory from ~130 MB past the 512 MB instance limit inside a
+# single allocation — the process is OOM-killed with no traceback, mid-loop,
+# and the run never reaches its summary log. That happened every night.
+#
+# 5 MB is far above any healthy RSS feed (the largest legitimate one here is
+# well under 1 MB), so this only ever trips on a source that would have taken
+# the whole process down. It also protects against feeds we haven't seen yet:
+# a source that grows or starts serving a bulk data dump gets skipped and
+# recorded as a failure instead of killing the run.
+MAX_FEED_BYTES = 5 * 1024 * 1024
+
+
+class FeedTooLarge(Exception):
+    """Raised when a feed exceeds MAX_FEED_BYTES, so it is skipped unparsed."""
+
+
+def _guard_size(response, source_name: str) -> str:
+    """Return the response body, or raise FeedTooLarge if it is oversized.
+
+    Checks the declared Content-Length first so an oversized feed can be
+    rejected before its body is touched, then re-checks the real length —
+    Content-Length is optional and can lie.
+    """
+    declared = response.headers.get("Content-Length") or response.headers.get("content-length")
+    if declared:
+        try:
+            if int(declared) > MAX_FEED_BYTES:
+                raise FeedTooLarge(
+                    f"{source_name}: declared {int(declared) // 1024} KB "
+                    f"exceeds {MAX_FEED_BYTES // 1024} KB cap"
+                )
+        except ValueError:
+            pass  # Unparseable header — fall through to the real check.
+
+    body = response.text
+    if len(body) > MAX_FEED_BYTES:
+        raise FeedTooLarge(
+            f"{source_name}: body {len(body) // 1024} KB "
+            f"exceeds {MAX_FEED_BYTES // 1024} KB cap"
+        )
+    return body
+
 # curl_cffi TLS-fingerprint impersonation targets. We rotate between several
 # Chrome releases so successive requests don't share an identical fingerprint.
 CHROME_VERSIONS = ["chrome110", "chrome116", "chrome120", "chrome124"]
@@ -348,7 +394,17 @@ def _process_json_feed(raw_text, source_id, source_name, stats):
 # ── Fetch orchestration ──────────────────────────────────────────────────────
 
 def _process_body(raw_text, is_json, source_id, source_name, stats):
-    """Route a fetched body to the JSON or RSS/Atom processor."""
+    """Route a fetched body to the JSON or RSS/Atom processor.
+
+    Enforces MAX_FEED_BYTES here as well as at fetch time: this is the single
+    point every body passes through, including the browser-service fallback,
+    so an oversized document can't reach the parser by another route.
+    """
+    if raw_text and len(raw_text) > MAX_FEED_BYTES:
+        raise FeedTooLarge(
+            f"{source_name}: body {len(raw_text) // 1024} KB "
+            f"exceeds {MAX_FEED_BYTES // 1024} KB cap"
+        )
     if is_json:
         return _process_json_feed(raw_text, source_id, source_name, stats)
     feed = feedparser.parse(raw_text)
@@ -363,6 +419,11 @@ def _browser_fallback(source, is_json, stats):
     try:
         content = fetch_via_browser_service(source_url, source_name)
         return _process_body(content, is_json, source_id, source_name, stats)
+    except FeedTooLarge as e:
+        log.error(f"[RSS] Oversized browser-fetched body skipped — {e}")
+        stats['errors'].append(f"Feed too large: {str(e)[:80]}")
+        record_source_failure(source_id, source_name)
+        return stats
     except Exception as browser_err:
         stats['errors'].append(f"Browser fallback failed: {str(browser_err)[:100]}")
         record_source_failure(source_id, source_name)
@@ -396,14 +457,22 @@ def fetch_source(source, session=None):
             return _browser_fallback(source, is_json, stats)
 
         response.raise_for_status()
+        # Reject oversized feeds BEFORE parsing — see MAX_FEED_BYTES.
+        body = _guard_size(response, source_name)
         # Trust the JSON content-type even if the URL didn't end in .json.
         return _process_body(
-            response.text,
+            body,
             is_json or _is_json_response(response),
             source_id,
             source_name,
             stats,
         )
+    except FeedTooLarge as e:
+        # Not a transient network fault — the source is structurally unsuitable,
+        # so log it loudly and let the failure counter disable it if it repeats.
+        log.error(f"[RSS] Oversized feed skipped — {e}")
+        stats['errors'].append(f"Feed too large: {str(e)[:80]}")
+        record_source_failure(source_id, source_name)
     except Exception as e:
         stats['errors'].append(str(e)[:100])
         record_source_failure(source_id, source_name)

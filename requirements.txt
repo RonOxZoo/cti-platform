@@ -1,4 +1,9 @@
 flask==3.1.3
+# Production WSGI server. Flask's built-in server is single-process and never
+# releases the memory its request handlers accumulate, so long feed-parsing runs
+# grew until the instance was OOM-killed. gunicorn's --max-requests recycles the
+# worker, which returns that memory to the OS.
+gunicorn==23.0.0
 requests==2.32.3
 curl-cffi==0.7.3
 feedparser==6.0.12

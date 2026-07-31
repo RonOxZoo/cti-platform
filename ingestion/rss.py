@@ -1,4 +1,5 @@
 import os
+import gc
 import time
 import json
 import random
@@ -421,6 +422,13 @@ def run_rss_ingestion(sources):
         total['sources_processed'] += 1
         if result['errors']:
             total['sources_failed'] += 1
+        # Drop this source's parse tree before moving on. feedparser/lxml build
+        # structures several times the size of the source document, and holding
+        # them across the whole loop is what pushed the instance over its memory
+        # limit. The collect() is deliberate: these trees contain reference
+        # cycles, so refcounting alone doesn't reclaim them promptly.
+        del result
+        gc.collect()
         # Random delay between feed fetches to mimic human browsing.
         time.sleep(random.uniform(1, 3))
     return total

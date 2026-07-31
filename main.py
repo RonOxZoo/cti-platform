@@ -892,11 +892,19 @@ def report_monthly_preview():
     return report["html"], 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
+# ── Startup banner ───────────────────────────────────────────
+# At module level, not inside the __main__ guard: under gunicorn this module is
+# imported rather than executed, so anything in that guard never runs and the
+# banner would silently vanish from the logs.
+log.info("═══════════════════════════════════════")
+log.info("  CTI Platform v1.1.0 starting...")
+log.info(f"  Port: {PORT}")
+log.info(f"  API Key configured: {'YES' if API_SECRET_KEY else 'NO'}")
+log.info("═══════════════════════════════════════")
+
+
 # ── Entry point ──────────────────────────────────────────────
+# Only used for local development. In production gunicorn serves `main:app`
+# directly and this block is skipped.
 if __name__ == "__main__":
-    log.info("═══════════════════════════════════════")
-    log.info("  CTI Platform v1.1.0 starting...")
-    log.info(f"  Port: {PORT}")
-    log.info(f"  API Key configured: {'YES' if API_SECRET_KEY else 'NO'}")
-    log.info("═══════════════════════════════════════")
     app.run(host="0.0.0.0", port=PORT, debug=False)

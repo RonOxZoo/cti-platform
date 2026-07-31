@@ -21,6 +21,12 @@ log = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+# How many feed sources one /ingest call polls when the caller doesn't say.
+# Polling all ~103 in a single process pushed peak memory past the instance
+# limit and the run was OOM-killed ~3.5 minutes in, every day, without ever
+# writing its summary log. Callers page through with offset/limit instead.
+DEFAULT_INGEST_CHUNK = 25
+
 
 # ── Auth ─────────────────────────────────────────────────────
 def verify_key(req) -> bool:
@@ -88,12 +94,24 @@ def ingest():
 
     started_at = datetime.now(timezone.utc).isoformat()
     execution_id = ""
+    offset = 0
+    limit = DEFAULT_INGEST_CHUNK
     if request.is_json and request.json:
         execution_id = request.json.get("execution_id", "")
+        try:
+            offset = max(0, int(request.json.get("offset", 0)))
+        except (TypeError, ValueError):
+            offset = 0
+        try:
+            limit = int(request.json.get("limit", DEFAULT_INGEST_CHUNK))
+        except (TypeError, ValueError):
+            limit = DEFAULT_INGEST_CHUNK
+        limit = max(1, min(limit, 200))
 
     log.info(f"[INGEST] ═══════════════════════════════════════")
     log.info(f"[INGEST] Starting — {started_at}")
     log.info(f"[INGEST] Execution ID: {execution_id}")
+    log.info(f"[INGEST] Chunk: offset={offset} limit={limit}")
 
     # ── Load sources ─────────────────────────────────────────
     try:
@@ -106,7 +124,8 @@ def ingest():
             "started_at": started_at
         }), 500
 
-    log.info(f"[INGEST] {len(sources)} active sources loaded")
+    total_sources = len(sources)
+    log.info(f"[INGEST] {total_sources} active sources loaded")
 
     if not sources:
         log.warning("[INGEST] No active sources found in rss_sources table")
@@ -117,9 +136,32 @@ def ingest():
             "started_at": started_at
         }), 200
 
+    # ── Take this call's slice ───────────────────────────────
+    # Polling all sources in one process drove peak memory past the instance
+    # limit, so the run was OOM-killed partway through and never wrote its
+    # summary log. Each call now handles a bounded chunk; the process exits
+    # between chunks, which returns the parser's peak memory to the OS.
+    chunk = sources[offset:offset + limit]
+    has_more = (offset + limit) < total_sources
+
+    if not chunk:
+        log.info(f"[INGEST] offset={offset} is past the end ({total_sources} sources) — nothing to do")
+        return jsonify({
+            "status": "success",
+            "message": "Offset beyond source list — nothing to process",
+            "offset": offset, "limit": limit,
+            "total_sources": total_sources,
+            "sources_in_chunk": 0, "has_more": False,
+            "items_fetched": 0, "items_inserted": 0, "items_skipped_dedup": 0,
+            "started_at": started_at,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+        }), 200
+
+    log.info(f"[INGEST] Processing sources {offset + 1}-{offset + len(chunk)} of {total_sources}")
+
     # ── Run ingestion ────────────────────────────────────────
     try:
-        stats = run_rss_ingestion(sources)
+        stats = run_rss_ingestion(chunk)
     except Exception as e:
         log.error(f"[INGEST] Ingestion failed: {e}")
         return jsonify({
@@ -155,6 +197,13 @@ def ingest():
         "status": "success",
         "started_at": started_at,
         "finished_at": datetime.now(timezone.utc).isoformat(),
+        # Chunk position, so the caller can page through and see progress.
+        "offset": offset,
+        "limit": limit,
+        "total_sources": total_sources,
+        "sources_in_chunk": len(chunk),
+        "next_offset": offset + len(chunk),
+        "has_more": has_more,
         "sources_processed": stats["sources_processed"],
         "sources_failed": stats["sources_failed"],
         "items_fetched": stats["fetched"],

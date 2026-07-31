@@ -14,9 +14,17 @@ MAX_SOURCE_FAILURES = 5
 
 
 def get_active_sources() -> list:
+    """Active feed sources, in a STABLE order.
+
+    The ordering matters: /ingest processes sources in offset/limit chunks
+    across several calls, and without a deterministic sort Postgres may return
+    rows in a different order each time — which would silently skip some
+    sources and poll others twice.
+    """
     result = client.table("rss_sources") \
         .select("id, url, name, category, trust_score") \
         .eq("active", True) \
+        .order("id") \
         .execute()
     return result.data or []
 

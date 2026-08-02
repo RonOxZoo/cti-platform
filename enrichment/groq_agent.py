@@ -25,6 +25,7 @@ import os
 import json
 import time
 import logging
+import re as _re
 
 import requests
 
@@ -46,9 +47,15 @@ log = logging.getLogger(__name__)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-# Used when the primary model errors outright (not merely bad JSON).
-GROQ_FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "llama-3.3-70b-versatile")
+# llama-3.3-70b leads on throughput, not quality. Measured free-tier ceilings:
+#   llama-3.3-70b-versatile   12,000 tokens/minute
+#   openai/gpt-oss-120b        8,000 tokens/minute
+# An enriched item costs ~5,000 tokens, so 8k/min allows barely one item per
+# minute and the run stalls immediately; 12k/min sustains the real workload.
+# gpt-oss-120b did score the sample item slightly better (critical vs high), so
+# it stays as the fallback and is worth revisiting if limits ever rise.
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "openai/gpt-oss-120b")
 
 # Groq's free tier is genuinely free, so cost telemetry stays zero. The field is
 # kept because the payload builder and reports read it.
@@ -56,10 +63,39 @@ COST_PER_TOKEN_USD = 0.0
 
 _TIMEOUT = 120
 _BACKOFF_429 = [5, 15, 45]
+# Longest we'll sit waiting out a per-minute limit. The token window is 60s, so
+# anything past this is a daily cap wearing a 429's clothing.
+_MAX_WAIT_SECONDS = 90
+
+# Groq writes the wait as "8.5s", "250ms" or the combined "1m30s".
+_RETRY_COMBINED_RE = _re.compile(r"try again in\s+(\d+)m([0-9.]+)s", _re.I)
+_RETRY_RE = _re.compile(r"try again in\s+([0-9.]+)\s*(ms|s|m)\b", _re.I)
 
 
 class GroqQuotaError(RuntimeError):
     """Free-tier daily/token quota exhausted — stop the run, leave jobs pending."""
+
+
+def _retry_after_seconds(resp, body_lower: str):
+    """Seconds to wait before retrying a 429, or None if unknown.
+
+    Prefers the Retry-After header, falling back to the wait Groq embeds in the
+    error text ("Please try again in 8.5s").
+    """
+    header = resp.headers.get("retry-after")
+    if header:
+        try:
+            return float(header)
+        except ValueError:
+            pass
+    m = _RETRY_COMBINED_RE.search(body_lower)
+    if m:
+        return int(m.group(1)) * 60 + float(m.group(2))
+    m = _RETRY_RE.search(body_lower)
+    if not m:
+        return None
+    value, unit = float(m.group(1)), m.group(2)
+    return value / 1000 if unit == "ms" else value * 60 if unit == "m" else value
 
 
 def call_groq(user_prompt: str, max_tokens: int = MAX_TOKENS,
@@ -102,17 +138,26 @@ def call_groq(user_prompt: str, max_tokens: int = MAX_TOKENS,
             raise RuntimeError(f"Groq request timed out after {_TIMEOUT}s")
 
         if resp.status_code == 429:
-            # Distinguish a per-minute rate limit (worth waiting out) from a
-            # daily quota (waiting won't help — stop and keep jobs pending).
-            body = resp.text.lower()
-            if "day" in body or "tpd" in body or "rpd" in body:
-                raise GroqQuotaError(resp.text[:300])
-            if backoff:
+            # Two very different things arrive as 429 and must not be conflated:
+            #   per-MINUTE limits  -> transient; wait the stated time and retry
+            #   per-DAY  limits    -> waiting is pointless; stop, requeue the job
+            # Groq states the wait explicitly ("Please try again in 8.5s"), so
+            # trust that over guessing from the wording.
+            body = resp.text
+            low = body.lower()
+            daily = ("per day" in low or "tpd" in low or "rpd" in low)
+            wait = _retry_after_seconds(resp, low)
+
+            if not daily and wait is not None and wait <= _MAX_WAIT_SECONDS:
+                log.warning(f"[GROQ] 429 token-rate limit — waiting {wait:.0f}s then retrying")
+                time.sleep(wait + 1)
+                continue
+            if not daily and backoff:
                 delay = backoff.pop(0)
                 log.warning(f"[GROQ] 429 rate limit — backing off {delay}s")
                 time.sleep(delay)
                 continue
-            raise GroqQuotaError("429 rate limit — retries exhausted")
+            raise GroqQuotaError(body[:300])
 
         if resp.status_code >= 400:
             raise RuntimeError(f"Groq HTTP {resp.status_code}: {resp.text[:250]}")

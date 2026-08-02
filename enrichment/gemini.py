@@ -20,7 +20,8 @@ from config import GEMINI_MODEL
 from database.supabase_client import client
 from enrichment.claude_agent import ClaudeCreditsError
 from enrichment.groq_agent import GroqQuotaError
-from notifier.telegram import send_critical_alert, notify_enrichment_complete
+# Push notifications are intentionally not imported here: enrichment no longer
+# sends anything to Telegram. See _handle_notifications for why.
 
 log = logging.getLogger(__name__)
 
@@ -583,42 +584,22 @@ def _log_quota_exceeded(started_at, items_processed):
         log.error(f"[GEMINI] failed to write quota_exceeded log: {e}")
 
 
-def _build_alert_item(job, result):
-    """Assemble the dict consumed by notifier.send_critical_alert()."""
-    iocs = result.get("iocs", {}) or {}
-    countries = result.get("targeted_countries", []) or []
-    return {
-        "severity": result.get("severity"),
-        "source": result.get("category") or "OSINT",
-        "title": job.get("title"),
-        "confidence": result.get("confidence"),
-        "category": result.get("category"),
-        "actors": result.get("actors", []),
-        "country": countries[0] if countries else None,
-        "targeted_countries": countries,
-        "cves": result.get("cves", []),
-        "mitre": result.get("mitre_techniques", []),
-        # Flatten hashes so the alert can render them inside <code> blocks.
-        "iocs": iocs,
-        "summary_en": result.get("summary_en"),
-        "model": result.get("model"),
-        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-    }
-
-
 def _handle_notifications(job, result, stats):
-    """Tally severity for this enriched item and dispatch urgent alerts.
+    """Tally severity for this enriched item.
 
-    Alert rules:
-      - every CRITICAL item -> immediate alert
-      - every HIGH item -> immediate alert
+    Per-item push alerts are OFF by design. Firing one message per critical and
+    high item buried the chat — a single ingestion run can enrich dozens, and
+    the flood drowned the daily brief and the bot menu it was meant to
+    highlight. Intelligence is now pulled, not pushed: the daily brief carries
+    the summary and the bot's buttons carry the detail on demand.
+
+    Nothing is lost by staying silent here. Every item is already persisted to
+    intelligence_items before this runs, so the bot and the brief surface it
+    either way.
     """
     severity = (result.get("severity") or "").strip().lower()
     if severity in ("critical", "high", "medium", "low"):
         stats[severity] += 1
-
-    if severity in ("critical", "high"):
-        send_critical_alert(_build_alert_item(job, result))
 
 
 def _select_agent():
@@ -817,13 +798,10 @@ def run_enrichment(limit=50):
         f"avg_compression={stats['avg_compression_ratio']}%"
     )
 
-    # Batch-complete summary notification (only sends when succeeded > 0).
-    # Isolated so a Telegram outage can never affect the enrichment result.
-    if stats["succeeded"] > 0:
-        try:
-            notify_enrichment_complete(stats)
-        except Exception as e:
-            log.error(f"[GEMINI] notify_enrichment_complete failed (non-fatal): {e}")
+    # No batch-complete notification: the enrichment worker runs every two
+    # hours, so this alone was a dozen messages a day announcing work the user
+    # never asked to be told about. Run results live in the logs and in
+    # /enrich/status.
 
     return stats
 

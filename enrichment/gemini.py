@@ -19,6 +19,7 @@ from google import genai
 from config import GEMINI_MODEL
 from database.supabase_client import client
 from enrichment.claude_agent import ClaudeCreditsError
+from enrichment.groq_agent import GroqQuotaError
 from notifier.telegram import send_critical_alert, notify_enrichment_complete
 
 log = logging.getLogger(__name__)
@@ -607,11 +608,21 @@ def _handle_notifications(job, result, stats):
 
 
 def _select_agent():
-    """Pick the enrichment engine: Claude (primary) -> Gemini (fallback) -> None.
+    """Pick the enrichment engine: Groq -> Claude -> Gemini -> None.
 
-    Returns "claude" if ANTHROPIC_API_KEY is set, else "gemini" if GEMINI_API_KEY
-    is set, else None (caller skips the run with a warning).
+    Groq leads because it is free, ~20-70x faster per item than Claude was, and
+    the Anthropic account ran out of credits — which stopped enrichment entirely
+    with 132 items queued. Claude stays ahead of Gemini so that topping up
+    credits restores the previous behaviour by simply unsetting GROQ_API_KEY.
+
+    ENRICHMENT_AGENT overrides the order outright ("groq"/"claude"/"gemini"),
+    which is how you A/B two engines on the same queue.
     """
+    forced = (os.getenv("ENRICHMENT_AGENT") or "").strip().lower()
+    if forced in ("groq", "claude", "gemini"):
+        return forced
+    if os.getenv("GROQ_API_KEY"):
+        return "groq"
     if os.getenv("ANTHROPIC_API_KEY"):
         return "claude"
     if os.getenv("GEMINI_API_KEY"):
@@ -677,7 +688,14 @@ def run_enrichment(limit=50):
         job_id = job.get("job_id")
         try:
             # ── 1. The ONLY AI call for this item ──
-            if agent == "claude":
+            if agent == "groq":
+                from enrichment.groq_agent import enrich_with_groq
+                sinfo = src_info.get(job.get("source_id"), {})
+                result = enrich_with_groq(
+                    job["title"], job["raw_content"],
+                    sinfo.get("name"), sinfo.get("category"), sinfo.get("trust_score"),
+                )
+            elif agent == "claude":
                 from enrichment.claude_agent import enrich_with_claude
                 sinfo = src_info.get(job.get("source_id"), {})
                 result = enrich_with_claude(
@@ -719,6 +737,17 @@ def run_enrichment(limit=50):
                 _handle_notifications(job, result, stats)
             except Exception as notify_err:
                 log.error(f"[ENRICH] Notification step failed (non-fatal): {notify_err}")
+        except GroqQuotaError as e:
+            # Free-tier quota gone for the day. Same policy as Claude credits:
+            # never mark the job failed, never silently downgrade to another
+            # engine — requeue it and stop so it is picked up when the quota
+            # resets.
+            log.error(f"[ENRICH] Groq quota exhausted — stopping run, job {job_id} left pending")
+            stats["processed"] -= 1  # this job never completed
+            mark_job_pending(job_id)
+            stats["quota_exceeded"] = True
+            stats["errors"].append(f"Groq quota exhausted — run stopped, job pending: {str(e)[:120]}")
+            break
         except ClaudeCreditsError as e:
             # PRIORITY ZERO: Claude is out of credits. DO NOT mark failed and DO
             # NOT fall back to Gemini — leave the job PENDING so Claude processes

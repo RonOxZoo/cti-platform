@@ -792,13 +792,18 @@ def report_weekly():
     except Exception as e:
         log.error(f"[REPORT] Weekly Telegram summary raised: {e}")
 
+    # Success is "the report reached a channel", not "email worked". Render's
+    # free tier blocks outbound SMTP, so email_sent is permanently False here —
+    # gating the status on it reported every successful weekly run as a 502 and
+    # surfaced a red error in the scheduler for a report that was delivered.
+    delivered = telegram_sent or email_sent
     return jsonify({
-        "status": "sent" if email_sent else "error",
+        "status": "sent" if delivered else "error",
         "email_sent": email_sent,
         "telegram_sent": telegram_sent,
         "stats": stats,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-    }), (200 if email_sent else 502)
+    }), (200 if delivered else 502)
 
 
 @app.route("/report/monthly", methods=["POST"])
@@ -844,13 +849,16 @@ def report_monthly():
     except Exception as e:
         log.error(f"[REPORT] Monthly Telegram summary raised: {e}")
 
+    # Same as weekly: delivery to any channel counts. Email cannot succeed on
+    # this tier, so making it the success condition marked working runs failed.
+    delivered = telegram_sent or email_sent
     return jsonify({
-        "status": "sent" if email_sent else "error",
+        "status": "sent" if delivered else "error",
         "email_sent": email_sent,
         "telegram_sent": telegram_sent,
         "stats": stats,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-    }), (200 if email_sent else 502)
+    }), (200 if delivered else 502)
 
 
 @app.route("/report/weekly/preview", methods=["GET"])

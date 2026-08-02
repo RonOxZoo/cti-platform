@@ -546,6 +546,34 @@ def _build_html(date_label: str, items: list, stats: dict) -> str:
 </html>"""
 
 
+def _store(report_date: str, html_doc: str, stats: dict):
+    """Upsert the report into daily_reports. Best-effort — never raises.
+
+    The daily report was the only one not persisted: it was rendered, pushed to
+    Telegram and discarded, so a missed message meant the day was simply gone
+    while weekly and monthly kept full history.
+
+    Upsert on report_date rather than insert, because the report is regenerated
+    whenever /report/daily is called and a plain insert would stack duplicate
+    rows for the same day.
+    """
+    payload = {
+        "report_date": report_date,
+        "report_html_en": html_doc,
+        "summary_stats": stats,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "delivered_gmail": False,
+        "delivered_telegram": True,
+    }
+    try:
+        client.table("daily_reports").upsert(payload, on_conflict="report_date").execute()
+        log.info(f"[REPORT] Stored daily report for {report_date}")
+    except Exception as e:
+        # A missing unique index on report_date, or a schema drift, must never
+        # cost us the report that was already generated and delivered.
+        log.error(f"[REPORT] _store failed (non-fatal): {str(e)[:200]}")
+
+
 def generate_daily_report(date: str = None) -> dict:
     """Generate the daily HTML intelligence report.
 
@@ -581,4 +609,5 @@ def generate_daily_report(date: str = None) -> dict:
     html_doc = _build_html(date_label, items, stats)
     log.info(f"[REPORT] Daily report generated — {date_label} total={stats['total']} "
              f"critical={stats['critical']} high={stats['high']}")
+    _store(date_label, html_doc, stats)
     return {"html": html_doc, "stats": stats, "items": items}

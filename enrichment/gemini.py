@@ -34,8 +34,19 @@ log = logging.getLogger(__name__)
 # 300s ceiling Make and gunicorn both impose.
 #
 # Keep this conservative: exceeding 300s doesn't slow the run down, it kills it.
-CALL_DELAY_SECONDS = 3        # delay between consecutive calls
-MAX_ITEMS_PER_RUN = 4         # hard cap on items processed per /enrich call
+CALL_DELAY_SECONDS = 2        # delay between consecutive calls
+MAX_ITEMS_PER_RUN = 10        # hard cap on items processed per /enrich call
+
+# Wall-clock budget for one /enrich call. Both Make's HTTP module and gunicorn
+# cut the request off at 300s, and an exceeded deadline doesn't slow a run down
+# — it kills it mid-item. The loop checks this before starting each item and
+# stops cleanly, leaving the remainder pending for the next run.
+#
+# This is what makes MAX_ITEMS_PER_RUN safe to raise: the item cap is the
+# optimistic target, the deadline is the real guard. If the free tier throttles
+# and items take longer than measured, the run simply does fewer of them
+# instead of failing.
+RUN_DEADLINE_SECONDS = 240
 
 # ingestion_logs scenario name used to record enrichment quota state. Kept
 # distinct from the RSS scenario so RSS runs don't overwrite the quota marker.
@@ -682,7 +693,20 @@ def run_enrichment(limit=50):
 
     from enrichment.contradiction import check_contradictions
 
+    run_started = time.time()
+
     for i, job in enumerate(jobs):
+        # Stop before starting an item we may not be able to finish. Anything
+        # left simply stays pending for the next run — far better than being
+        # killed mid-item by the 300s request timeout.
+        elapsed = time.time() - run_started
+        if i > 0 and elapsed > RUN_DEADLINE_SECONDS:
+            remaining = len(jobs) - i
+            log.info(f"[ENRICH] Deadline reached after {elapsed:.0f}s — stopping with "
+                     f"{remaining} of this batch left pending for the next run")
+            stats["skipped"] += remaining
+            break
+
         # Throttle between calls (not before the first one).
         if i > 0:
             time.sleep(CALL_DELAY_SECONDS)

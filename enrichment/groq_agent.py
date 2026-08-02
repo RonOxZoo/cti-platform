@@ -36,8 +36,10 @@ from enrichment.claude_agent import (
     MAX_TOKENS_RETRY,
     SYSTEM_PROMPT,
     TEMPERATURE,
+    _GENERIC_JSON_SYSTEM,
     _parse_and_flatten,
     _prefill_category,
+    _strip_code_fences,
     _summaries_empty,
     build_user_prompt,
     validate_enrichment,
@@ -172,6 +174,20 @@ def call_groq(user_prompt: str, max_tokens: int = MAX_TOKENS,
             "total": usage_raw.get("total_tokens", 0),
         }
         return text, usage, choice.get("finish_reason")
+
+
+def complete_json(user_prompt: str, max_tokens: int = 2500) -> dict:
+    """Single Groq call for a free-form JSON task (e.g. a report narrative).
+
+    The Groq-side twin of claude_agent.complete_json, reusing that module's
+    generic system prompt so narratives keep the same voice regardless of which
+    engine produced them. Raises GroqQuotaError on quota exhaustion and
+    json.JSONDecodeError on unparseable output — reporting/narrative.py catches
+    both and falls through to its next option.
+    """
+    raw, _usage, _finish = call_groq(user_prompt, max_tokens=max_tokens,
+                                     system_prompt=_GENERIC_JSON_SYSTEM)
+    return json.loads(_strip_code_fences(raw))
 
 
 def _merge(a: dict, b: dict) -> dict:

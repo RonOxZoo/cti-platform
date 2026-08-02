@@ -1,17 +1,23 @@
 """
-Report-narrative LLM router — Claude PRIMARY, Gemini FALLBACK (PRIORITY ZERO).
+Report-narrative LLM router — Groq PRIMARY, then Claude, then Gemini.
 
 Weekly and monthly reports need free-form JSON narrative sections. This module
-keeps the agent priority consistent with enrichment:
+mirrors the enrichment path's engine order so a report is never written by a
+different model than the items it summarises:
 
-  1. Claude (claude_agent.complete_json) when ANTHROPIC_API_KEY is set.
-  2. Gemini (enrichment.gemini.call_gemini) as fallback.
-  3. None -> the caller uses its own deterministic narrative.
+  1. Groq   (groq_agent.complete_json)   when GROQ_API_KEY is set.
+  2. Claude (claude_agent.complete_json) when ANTHROPIC_API_KEY is set.
+  3. Gemini (enrichment.gemini.call_gemini) as a last LLM attempt.
+  4. None -> the caller uses its own deterministic narrative.
 
-Unlike the enrichment path, a narrative is non-critical: a Claude failure here
-(including a credits/billing error) is logged and falls through to Gemini, then
-to the deterministic fallback — a report is ALWAYS produced. Returns a dict on
-success or None so the caller can apply its fallback.
+Groq leads because the Anthropic account has no credits; without this the
+weekly and monthly reports were the last place still calling a dead API, and
+every run silently degraded to the deterministic text.
+
+Unlike enrichment, a narrative is non-critical: any failure here — including
+quota or billing errors — is logged and falls through to the next option, so a
+report is ALWAYS produced. Returns a dict on success or None for the caller's
+fallback.
 """
 import os
 import logging
@@ -20,14 +26,25 @@ log = logging.getLogger(__name__)
 
 
 def generate_narrative(prompt: str) -> dict:
-    """Produce a narrative JSON dict via Claude (primary) then Gemini. None if both fail."""
-    # 1. Claude primary.
+    """Produce a narrative JSON dict via Groq, then Claude, then Gemini. None if all fail."""
+    # 1. Groq primary.
+    if os.getenv("GROQ_API_KEY"):
+        try:
+            from enrichment.groq_agent import complete_json as groq_complete_json
+            result = groq_complete_json(prompt)
+            if isinstance(result, dict) and result:
+                log.info("[NARRATIVE] generated via groq (primary)")
+                return result
+        except Exception as e:
+            log.warning(f"[NARRATIVE] Groq narrative failed, trying Claude: {str(e)[:160]}")
+
+    # 2. Claude.
     if os.getenv("ANTHROPIC_API_KEY"):
         try:
             from enrichment.claude_agent import complete_json
             result = complete_json(prompt)
             if isinstance(result, dict) and result:
-                log.info("[NARRATIVE] generated via claude (primary)")
+                log.info("[NARRATIVE] generated via claude")
                 return result
         except Exception as e:
             # Non-critical: log and fall through to Gemini (a report must ship).

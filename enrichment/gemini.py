@@ -25,14 +25,17 @@ from notifier.telegram import send_critical_alert, notify_enrichment_complete
 log = logging.getLogger(__name__)
 
 # Free-tier rate-limit protection + request-timeout protection.
-# Measured Claude latency in production is 40-140s per item (occasional 500s
-# force a retry, adding ~10-100s more) — well above the ~20-30s originally
-# assumed here. Make's HTTP module has a hard 300s per-call timeout, so the
-# cap must keep even a worst-case run (multiple retries) safely under that.
-# 2 items x ~140s worst case = ~280s, with margin. The daily Make scenario
-# calls /enrich multiple times, so the queue still drains across the day.
-CALL_DELAY_SECONDS = 5        # delay between consecutive Gemini calls
-MAX_ITEMS_PER_RUN = 2         # hard cap on items processed per /enrich call
+#
+# The cap of 2 was sized for Claude, which took 40-140s per item. Groq returns
+# in 3-4s (measured: 61.6s Claude vs 3.4s Groq on comparable items), so latency
+# is no longer what bounds a run — the free tier's 12,000 tokens/minute is.
+# An enriched item costs ~5,000 tokens, i.e. roughly 2.4 items per minute, so 4
+# items means one rate-limit wait mid-run and still finishes well inside the
+# 300s ceiling Make and gunicorn both impose.
+#
+# Keep this conservative: exceeding 300s doesn't slow the run down, it kills it.
+CALL_DELAY_SECONDS = 3        # delay between consecutive calls
+MAX_ITEMS_PER_RUN = 4         # hard cap on items processed per /enrich call
 
 # ingestion_logs scenario name used to record enrichment quota state. Kept
 # distinct from the RSS scenario so RSS runs don't overwrite the quota marker.

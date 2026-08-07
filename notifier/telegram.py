@@ -79,8 +79,13 @@ def _now_str() -> str:
 
 
 # ── Core send ────────────────────────────────────────────────
-def send_message(text: str, parse_mode: str = "HTML") -> bool:
-    """Send a simple text message to the CTI channel.
+def send_message(text: str, parse_mode: str = "HTML", keyboard: list = None) -> bool:
+    """Send a text message to the CTI channel, optionally with inline buttons.
+
+    `keyboard` is a list of button rows in Telegram's inline_keyboard shape.
+    Attaching it here is what lets a pushed message double as an entry point
+    into the bot: without buttons the daily brief was a dead end, and reaching
+    any detail meant remembering to type /start in a separate message.
 
     Returns True on success, False on any failure or if Telegram is not
     configured. Never raises.
@@ -103,6 +108,8 @@ def send_message(text: str, parse_mode: str = "HTML") -> bool:
         "parse_mode": parse_mode,
         "disable_web_page_preview": True,
     }
+    if keyboard:
+        payload["reply_markup"] = {"inline_keyboard": keyboard}
 
     with _send_lock:
         _throttle()
@@ -307,6 +314,42 @@ def _norm_sev(severity) -> str:
     return s if s in ("critical", "high", "medium", "low") else "unknown"
 
 
+# How many stories get their own button under the brief. Telegram allows more,
+# but a keyboard taller than this scrolls awkwardly on a phone and buries the
+# navigation row at the bottom.
+_BRIEF_BUTTON_CAP = 10
+
+_SEV_ICON = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "⚪"}
+
+
+def _brief_keyboard(ranked_items: list) -> list:
+    """One button per story, labelled with its subject, plus a navigation row.
+
+    This is what turns the brief from a wall of text into an index. Each button
+    carries the item's UUID (`b:<id>`, ~38 bytes, well inside Telegram's 64-byte
+    callback_data limit) rather than a position, so a button keeps working even
+    after new items arrive and shift every index.
+    """
+    rows = []
+    for item in (ranked_items or [])[:_BRIEF_BUTTON_CAP]:
+        item_id = item.get("id")
+        if not item_id:
+            continue
+        icon = _SEV_ICON.get(_norm_sev(item.get("severity")), "⚪")
+        title = _item_title(item)
+        # Telegram wraps long labels badly on mobile; trim on a word boundary.
+        if len(title) > 42:
+            title = title[:42].rsplit(" ", 1)[0].rstrip(" ,;:—-")
+        rows.append([{"text": f"{icon} {title}", "callback_data": f"b:{item_id}"}])
+
+    rows.append([
+        {"text": "🔴 Critical", "callback_data": "l:c:0"},
+        {"text": "🟠 High", "callback_data": "l:h:0"},
+    ])
+    rows.append([{"text": "🏠 תפריט ראשי", "callback_data": "h"}])
+    return rows
+
+
 def send_daily_summary(stats: dict) -> bool:
     """Send the FULL daily intelligence brief to Telegram.
 
@@ -430,9 +473,10 @@ def send_daily_summary(stats: dict) -> bool:
         parts.append("\n\n".join(en_bits))
 
     parts.append(_SEP)
-    parts.append(f"🤖 CTI Platform | Claude {_esc(model or '—')}")
+    parts.append(f"🤖 CTI Platform | {_esc(model or '—')}")
+    parts.append("👇 בחר ידיעה לקריאה מלאה ולקישור למקור")
 
-    return send_message("\n".join(parts))
+    return send_message("\n".join(parts), keyboard=_brief_keyboard(ranked))
 
 
 def send_weekly_summary(stats: dict) -> bool:

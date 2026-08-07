@@ -403,8 +403,99 @@ def _already_handled(callback_id: str) -> bool:
     return False
 
 
+def render_brief_item(item_id: str, lang: str = None) -> tuple:
+    """Render one story picked from the daily brief, looked up by its UUID.
+
+    The brief's buttons carry item ids rather than list positions, so this can
+    fetch the exact row without depending on any ordering the brief happened to
+    use when it was sent — a brief from this morning still resolves correctly
+    tonight, after dozens of newer items have arrived.
+    """
+    try:
+        rows = (client.table("intelligence_items").select(_SELECT)
+                .eq("id", item_id).limit(1).execute().data) or []
+    except Exception as e:
+        log.error(f"[BOT] brief item lookup failed: {str(e)[:200]}")
+        rows = []
+
+    if not rows:
+        return ("⚠️ הידיעה לא נמצאה — ייתכן שנמחקה במסגרת מדיניות השמירה.",
+                [[{"text": "🏠 תפריט ראשי", "callback_data": "h"}]])
+
+    item = rows[0]
+    item["_score"] = _score(item)
+    ed = item.get("enrichment_data") or {}
+    sev = (item.get("severity") or "").lower()
+    url = _source_url(item)
+
+    if lang:
+        # Full read in the chosen language.
+        other = "en" if lang == "he" else "he"
+        summary = (item.get(f"summary_{lang}") or "").strip()
+        if not summary:
+            note = ("⚠️ אין תרגום לעברית לידיעה זו."
+                    if lang == "he" else "⚠️ No English text for this item.")
+            kb = [[{"text": "🇬🇧 English" if lang == "he" else "🇮🇱 עברית",
+                    "callback_data": f"bv:{item_id}:{other}"}],
+                  [{"text": "🏠 תפריט ראשי", "callback_data": "h"}]]
+            return note, kb
+
+        labels = _LABELS_HE if lang == "he" else _LABELS_EN
+        body_lines = []
+        for label, para in zip(labels, _split_5(summary)):
+            if para and para != "—":
+                prefix = _RLM if lang == "he" else ""
+                body_lines.append(f"{label}: {prefix}{_esc(defang_all(para))}")
+        body = "\n\n".join(body_lines)
+        if len(body) > _MAX_BODY_LEN:
+            body = _trim_to_sentence(body, _MAX_BODY_LEN)
+
+        text = (f"📋 <b>{_esc(_title(item))}</b>\n"
+                f"📊 {_SEV_LABEL.get(sev, sev)} · {_date_of(item)}\n"
+                f"{'━' * 15}\n" + body)
+        if len(text) > _MAX_MESSAGE_LEN:
+            text = text[: _MAX_MESSAGE_LEN - 1] + "…"
+
+        kb = [[{"text": "🇬🇧 English" if lang == "he" else "🇮🇱 עברית",
+                "callback_data": f"bv:{item_id}:{other}"}]]
+        if url.startswith(("http://", "https://")):
+            kb.append([{"text": "🔗 קרא בכתבה המקורית", "url": url}])
+        kb.append([{"text": "🏠 תפריט ראשי", "callback_data": "h"}])
+        return text, kb
+
+    # Card view: metadata plus the language choice and the source link.
+    tags = [f"<code>{_esc(c)}</code>" for c in (ed.get("cves") or [])[:3]]
+    tags += [f"<code>{_esc(defang_all(str(a)))}</code>" for a in (ed.get("actors") or [])[:2]]
+
+    lines = [
+        f"📋 <b>{_esc(_title(item))}</b>",
+        "━" * 15,
+        f"📊 {_SEV_LABEL.get(sev, sev)} · Confidence: {item.get('confidence_score', '—')}%",
+        f"📅 {_date_of(item)}",
+    ]
+    if item.get("source_category"):
+        lines.append(f"🏢 {_esc(item['source_category'])}")
+    if tags:
+        lines.append(f"🏷 {' · '.join(tags)}")
+    flags = []
+    if item.get("israel_relevance"):
+        flags.append("🇮🇱 Israel")
+    if item.get("iran_nexus"):
+        flags.append("🇮🇷 Iran nexus")
+    if flags:
+        lines.append(" · ".join(flags))
+
+    kb = [[{"text": "🇮🇱 עברית", "callback_data": f"bv:{item_id}:he"},
+           {"text": "🇬🇧 English", "callback_data": f"bv:{item_id}:en"}]]
+    if url.startswith(("http://", "https://")):
+        kb.append([{"text": "🔗 קרא בכתבה המקורית", "url": url}])
+    kb.append([{"text": "🏠 תפריט ראשי", "callback_data": "h"}])
+    return "\n".join(lines), kb
+
+
 def _route(data: str) -> tuple:
     """Map callback_data to a rendered (text, keyboard). Returns None for no-op."""
+    # Item ids are UUIDs containing no colons, so a plain split is safe.
     parts = data.split(":")
     kind = parts[0]
 
@@ -412,6 +503,10 @@ def _route(data: str) -> tuple:
         return None
     if kind == "h":
         return render_dashboard()
+    if kind == "b" and len(parts) == 2:               # story from the daily brief
+        return render_brief_item(parts[1])
+    if kind == "bv" and len(parts) == 3:              # that story, in one language
+        return render_brief_item(parts[1], parts[2])
     if kind == "l" and len(parts) == 3:
         return render_list(parts[1], int(parts[2]))
     if kind == "i" and len(parts) == 4:

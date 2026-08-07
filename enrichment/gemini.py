@@ -9,6 +9,7 @@ rate-limit errors. When the daily quota is hit we record it and skip the next
 run entirely instead of burning through the remaining quota with retries.
 """
 import os
+import re
 import json
 import time
 import logging
@@ -399,7 +400,7 @@ def build_intelligence_payload(job, result):
         # agents don't emit a title of their own, so without this every row lands
         # with title_en NULL and renders as "(untitled)" in the Telegram brief
         # and reports.
-        "title_en": (job.get("title") or "").strip() or None,
+        "title_en": _readable_title(job.get("title"), result),
         "severity": result.get("severity"),
         "severity_rationale": result.get("severity_reason"),
         "confidence_score": confidence,
@@ -602,6 +603,63 @@ def _log_quota_exceeded(started_at, items_processed):
 # 200 sits well below a genuine short article (real items compress to 500-3000)
 # and well above these stubs.
 MIN_ANALYZABLE_CHARS = 200
+
+
+# Titles that are nothing but a CVE identifier, e.g. "CVE-2026-68576".
+_BARE_CVE_TITLE = re.compile(r"^\s*CVE[-‑]\d{4}[-‑]\d{4,}\s*$", re.I)
+# Section labels the summary sometimes opens with ("INCIDENT: ...").
+_SUMMARY_LABEL = re.compile(r"^\s*[A-Z][A-Z /_-]{2,}\s*:\s*", re.I)
+
+_TITLE_MAX = 95
+
+
+def _readable_title(source_title, result: dict) -> str:
+    """Turn a bare CVE identifier into something a human can scan.
+
+    Several vulnerability feeds title their entries with nothing but the CVE
+    number, which reads as an unusable wall of "CVE-2026-68576" in the daily
+    brief and on the bot's buttons. The descriptive text always exists — just
+    not in the title field — so it is recovered from, in order of quality:
+
+      1. CISA KEV's vulnerabilityName, which already reads as a headline
+         ("JetBrains TeamCity Deserialization of Untrusted Data Vulnerability")
+      2. the opening sentence of the generated summary, which names the flaw
+         class and the affected product
+
+    The CVE id is appended rather than dropped: it is the identifier an analyst
+    actually searches on. Any title that is already descriptive is returned
+    untouched.
+    """
+    title = (source_title or "").strip()
+    if not title:
+        return None
+    if not _BARE_CVE_TITLE.match(title):
+        return title
+
+    cve = title.upper().replace("‑", "-")
+
+    # 1. CISA KEV names the vulnerability outright.
+    try:
+        from enrichment.kev import lookup
+        matches = lookup([cve]).get("matches") or []
+        if matches and matches[0].get("name"):
+            return f"{matches[0]['name'][:_TITLE_MAX]} ({cve})"
+    except Exception:
+        pass
+
+    # 2. Fall back to the first sentence of the summary.
+    summary = (result.get("summary_en") or "").strip()
+    if summary:
+        first = _SUMMARY_LABEL.sub("", summary.split("\n")[0]).strip()
+        first = re.split(r"(?<=[.!?])\s", first)[0].strip().rstrip(".")
+        # Drop a leading article so the title starts on the substance.
+        first = re.sub(r"^(an?|the)\s+", "", first, flags=re.I)
+        if first:
+            if len(first) > _TITLE_MAX:
+                first = first[:_TITLE_MAX].rsplit(" ", 1)[0].rstrip(" ,;:—-")
+            return f"{first[0].upper()}{first[1:]} ({cve})"
+
+    return title
 
 
 def _drop_unanalyzable(jobs: list, stats: dict) -> list:

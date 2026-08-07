@@ -21,8 +21,26 @@ CTI platform consists of two services on Render:
 Already deployed at: **https://cti-platform-zk3k.onrender.com**
 
 To redeploy:
-- Push to the tracked branch; Render auto-builds, or trigger a manual deploy from the Render dashboard.
-- Required environment variables: `SUPABASE_URL`, `SUPABASE_KEY`, `API_SECRET_KEY`, `PORT` (5000), `GEMINI_API_KEY`, `BROWSER_SERVICE_URL` (see step 4).
+- Push to the tracked branch; Render auto-builds. Do **not** also trigger a manual deploy — two overlapping deploys restart the service mid-request and kill anything in flight.
+
+**Start command** (not `python main.py` — Flask's development server is single-process and not built for this):
+
+```
+gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 300 \
+         --graceful-timeout 60 --max-requests 200 --max-requests-jitter 20 \
+         --access-logfile - main:app
+```
+
+`--timeout 300` matters: enrichment and ingestion calls legitimately run for
+minutes. `--max-requests` recycles the worker periodically for memory hygiene —
+keep it well above 1, or the recycle fires mid-request and kills long calls.
+
+**Required environment variables:** `SUPABASE_URL`, `SUPABASE_KEY`,
+`API_SECRET_KEY`, `PORT` (5000), `GROQ_API_KEY`, `TELEGRAM_BOT_TOKEN`,
+`TELEGRAM_CHAT_ID`, `BROWSER_SERVICE_URL` (see step 4).
+
+**Optional:** `GROQ_MODELS` (rotation order), `ENRICHMENT_AGENT` (force an
+engine), `ANTHROPIC_API_KEY` (Claude as fallback), `TELEGRAM_WEBHOOK_SECRET`.
 
 ---
 

@@ -427,6 +427,10 @@ def build_intelligence_payload(job, result):
             "malware_families": malware_families,
             "c2_servers": iocs.get("c2_servers", []),
             "contradiction_note": result.get("contradiction_note"),
+            # CISA KEV cross-reference: present only when one of this item's
+            # CVEs is in the catalog. Kept so a reader can tell a severity that
+            # came from confirmed exploitation apart from one the model inferred.
+            "kev": result.get("kev"),
             # ── Agent / token telemetry (PRIORITY ZERO enriched_by tracking).
             # Claude populates all of these; Gemini sets enriched_by only and the
             # rest fall through as None — which is the intended "fallback ran" mark.
@@ -763,6 +767,16 @@ def run_enrichment(limit=50):
             else:
                 result = call_gemini_with_retry(build_prompt(job["title"], job["raw_content"]))
                 result["enriched_by"] = "gemini"
+
+            # ── 1b. Ground severity in CISA KEV (zero tokens) ──
+            # The model infers severity from the article's wording. If CISA has
+            # confirmed one of these CVEs is being exploited right now, that
+            # fact outranks the inference — so the grade is raised to match.
+            try:
+                from enrichment.kev import apply_to_result
+                result = apply_to_result(result)
+            except Exception as e:
+                log.warning(f"[KEV] cross-reference skipped (non-fatal): {str(e)[:120]}")
 
             # Accumulate token / cost / compression telemetry (Claude path).
             tk = result.get("tokens_used") or 0

@@ -68,7 +68,7 @@ def root():
         "version": "1.1.0",
         "endpoints": ["/health", "/ingest", "/enrich", "/enrich/status",
                       "/cleanup", "/status",
-                      "/feeds/health", "/ask", "/search", "/trending",
+                      "/feeds/health", "/search", "/trending",
                       "/notify/test", "/notify/daily", "/notify/critical",
                       "/report/daily", "/report/preview",
                       "/report/weekly", "/report/weekly/preview",
@@ -428,40 +428,12 @@ def enrich_status():
     return jsonify(counts), 200
 
 
-# ── RAG endpoints ────────────────────────────────────────────
-@app.route("/ask", methods=["POST"])
-def ask():
-    """Auth-protected RAG Q&A — answer a question grounded in our intelligence.
-
-    Rate-limited to 10 requests/minute (free Gemini tier).
-    """
-    if not verify_key(request):
-        log.warning("[ASK] Unauthorized request blocked")
-        return jsonify({"error": "Unauthorized", "hint": "Check X-API-Key header"}), 401
-
-    if rate_limited("ask", max_calls=10, per_seconds=60):
-        log.warning("[ASK] Rate limit exceeded (10/min)")
-        return jsonify({
-            "error": "Rate limit exceeded",
-            "hint": "Maximum 10 requests per minute",
-        }), 429
-
-    body = request.json if request.is_json else None
-    question = (body or {}).get("question", "").strip()
-    if not question:
-        return jsonify({"error": "Missing 'question' in request body"}), 400
-
-    log.info(f"[ASK] Question: {question[:120]}")
-    try:
-        from rag.gemini_rag import ask_intelligence
-        result = ask_intelligence(question)
-    except Exception as e:
-        log.error(f"[ASK] ask_intelligence failed: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-    return jsonify(result), 200
-
-
+# ── Search endpoints ─────────────────────────────────────────
+# POST /ask (natural-language Q&A) was removed along with the vector RAG layer
+# it depended on: pgvector was never installed on the database, so the vector
+# store, its index and match_intel_chunks() did not exist and every call fell
+# through to an error. /search below covers retrieval on the full-text index,
+# which is populated and working.
 @app.route("/search", methods=["POST"])
 def search_endpoint():
     """Auth-protected — typed search over collected intelligence.
@@ -760,21 +732,13 @@ def report_weekly():
     except Exception as e:
         log.error(f"[REPORT] Weekly report generation failed: {e}")
         try:
-            from notifier.gmail import send_error_alert
+            from notifier.telegram import send_error_alert
             send_error_alert("report/weekly", str(e))
         except Exception:
             pass
         return jsonify({"status": "error", "message": str(e)}), 500
 
     stats = report["stats"]
-
-    email_sent = False
-    try:
-        from notifier.gmail import send_weekly_report
-        email_sent = send_weekly_report(report["html"], stats)
-    except Exception as e:
-        log.error(f"[REPORT] Weekly email send raised: {e}")
-
     telegram_sent = False
     try:
         from notifier.telegram import send_weekly_summary
@@ -792,18 +756,12 @@ def report_weekly():
     except Exception as e:
         log.error(f"[REPORT] Weekly Telegram summary raised: {e}")
 
-    # Success is "the report reached a channel", not "email worked". Render's
-    # free tier blocks outbound SMTP, so email_sent is permanently False here —
-    # gating the status on it reported every successful weekly run as a 502 and
-    # surfaced a red error in the scheduler for a report that was delivered.
-    delivered = telegram_sent or email_sent
     return jsonify({
-        "status": "sent" if delivered else "error",
-        "email_sent": email_sent,
+        "status": "sent" if telegram_sent else "error",
         "telegram_sent": telegram_sent,
         "stats": stats,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-    }), (200 if delivered else 502)
+    }), (200 if telegram_sent else 502)
 
 
 @app.route("/report/monthly", methods=["POST"])
@@ -824,21 +782,13 @@ def report_monthly():
     except Exception as e:
         log.error(f"[REPORT] Monthly report generation failed: {e}")
         try:
-            from notifier.gmail import send_error_alert
+            from notifier.telegram import send_error_alert
             send_error_alert("report/monthly", str(e))
         except Exception:
             pass
         return jsonify({"status": "error", "message": str(e)}), 500
 
     stats = report["stats"]
-
-    email_sent = False
-    try:
-        from notifier.gmail import send_monthly_report
-        email_sent = send_monthly_report(report["html"], stats)
-    except Exception as e:
-        log.error(f"[REPORT] Monthly email send raised: {e}")
-
     telegram_sent = False
     try:
         from notifier.telegram import send_monthly_summary
@@ -849,16 +799,12 @@ def report_monthly():
     except Exception as e:
         log.error(f"[REPORT] Monthly Telegram summary raised: {e}")
 
-    # Same as weekly: delivery to any channel counts. Email cannot succeed on
-    # this tier, so making it the success condition marked working runs failed.
-    delivered = telegram_sent or email_sent
     return jsonify({
-        "status": "sent" if delivered else "error",
-        "email_sent": email_sent,
+        "status": "sent" if telegram_sent else "error",
         "telegram_sent": telegram_sent,
         "stats": stats,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-    }), (200 if delivered else 502)
+    }), (200 if telegram_sent else 502)
 
 
 @app.route("/report/weekly/preview", methods=["GET"])

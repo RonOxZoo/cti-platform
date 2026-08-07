@@ -49,15 +49,38 @@ log = logging.getLogger(__name__)
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
-# llama-3.3-70b leads on throughput, not quality. Measured free-tier ceilings:
-#   llama-3.3-70b-versatile   12,000 tokens/minute
-#   openai/gpt-oss-120b        8,000 tokens/minute
-# An enriched item costs ~5,000 tokens, so 8k/min allows barely one item per
-# minute and the run stalls immediately; 12k/min sustains the real workload.
-# gpt-oss-120b did score the sample item slightly better (critical vs high), so
-# it stays as the fallback and is worth revisiting if limits ever rise.
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-GROQ_FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "openai/gpt-oss-120b")
+
+# Model rotation. Each model carries its OWN free-tier daily token budget
+# (100,000 TPD for llama-3.3-70b), so one model alone caps enrichment at ~37
+# items/day against an intake of 75-90 — the queue grew to 804 before this was
+# found. Rotating across three models roughly triples the daily ceiling at no
+# cost, because exhausting one does not touch the others' budgets.
+#
+# Order is by measured quality on a real Sandworm/wiper item:
+#   gpt-oss-120b   1.4s  graded it critical (correct), precise Hebrew terminology
+#   llama-3.3-70b  3.9s  solid, the previous primary
+#   gpt-oss-20b    0.5s  good Hebrew, slightly softer grading
+# Excluded deliberately: qwen3.6-27b fails JSON validation repeatedly, and
+# llama-3.1-8b-instant writes noticeably weaker Hebrew ("virus" for "wiper").
+GROQ_MODELS = [m.strip() for m in os.getenv(
+    "GROQ_MODELS",
+    "openai/gpt-oss-120b,llama-3.3-70b-versatile,openai/gpt-oss-20b",
+).split(",") if m.strip()]
+
+# Models whose daily budget is spent, mapped to the UTC timestamp they free up
+# again. Process-local: a restart just retries and re-learns within one call,
+# which is cheaper than persisting state for something that resets daily.
+_exhausted_until: dict = {}
+
+
+def _available_models() -> list:
+    """Rotation order with daily-exhausted models dropped."""
+    now = time.time()
+    for model, until in list(_exhausted_until.items()):
+        if now >= until:
+            del _exhausted_until[model]
+            log.info(f"[GROQ] {model} daily budget reset — back in rotation")
+    return [m for m in GROQ_MODELS if m not in _exhausted_until]
 
 # Groq's free tier is genuinely free, so cost telemetry stays zero. The field is
 # kept because the payload builder and reports read it.
@@ -75,7 +98,11 @@ _RETRY_RE = _re.compile(r"try again in\s+([0-9.]+)\s*(ms|s|m)\b", _re.I)
 
 
 class GroqQuotaError(RuntimeError):
-    """Free-tier daily/token quota exhausted — stop the run, leave jobs pending."""
+    """Every model's budget is spent — stop the run, leave jobs pending."""
+
+
+class GroqDailyLimit(RuntimeError):
+    """One model's daily budget is spent. Internal: the caller rotates onward."""
 
 
 def _retry_after_seconds(resp, body_lower: str):
@@ -110,7 +137,11 @@ def call_groq(user_prompt: str, max_tokens: int = MAX_TOKENS,
     if not GROQ_API_KEY:
         raise RuntimeError("GROQ_API_KEY is not set")
 
-    model = model or GROQ_MODEL
+    # complete_json() and other single-shot callers don't rotate; give them the
+    # best model that still has budget today.
+    if not model:
+        available = _available_models()
+        model = available[0] if available else GROQ_MODELS[0]
     backoff = list(_BACKOFF_429)
 
     while True:
@@ -142,19 +173,29 @@ def call_groq(user_prompt: str, max_tokens: int = MAX_TOKENS,
         if resp.status_code == 429:
             # Two very different things arrive as 429 and must not be conflated:
             #   per-MINUTE limits  -> transient; wait the stated time and retry
-            #   per-DAY  limits    -> waiting is pointless; stop, requeue the job
-            # Groq states the wait explicitly ("Please try again in 8.5s"), so
+            #   per-DAY  limits    -> this model is done until it resets; the
+            #                         caller moves to the next model instead
+            # Groq states the wait explicitly ("Please try again in 28m18s"), so
             # trust that over guessing from the wording.
             body = resp.text
             low = body.lower()
             daily = ("per day" in low or "tpd" in low or "rpd" in low)
             wait = _retry_after_seconds(resp, low)
 
-            if not daily and wait is not None and wait <= _MAX_WAIT_SECONDS:
+            if daily:
+                # Park this model until its budget resets so the rotation skips
+                # it instead of burning a request on it every single item.
+                until = time.time() + (wait if wait else 3600)
+                _exhausted_until[model] = until
+                mins = (until - time.time()) / 60
+                log.warning(f"[GROQ] {model} daily budget spent — out of rotation for {mins:.0f}m")
+                raise GroqDailyLimit(f"{model}: {body[:200]}")
+
+            if wait is not None and wait <= _MAX_WAIT_SECONDS:
                 log.warning(f"[GROQ] 429 token-rate limit — waiting {wait:.0f}s then retrying")
                 time.sleep(wait + 1)
                 continue
-            if not daily and backoff:
+            if backoff:
                 delay = backoff.pop(0)
                 log.warning(f"[GROQ] 429 rate limit — backing off {delay}s")
                 time.sleep(delay)
@@ -212,18 +253,31 @@ def enrich_with_groq(title, content, source_name, source_category, trust_score) 
     prompt = build_user_prompt(title, compressed, source_name, source_category,
                                trust_score, prefill, lang)
 
-    # Step 2 — the model call.
-    model_used = GROQ_MODEL
-    try:
-        raw, usage, finish = call_groq(prompt)
-    except GroqQuotaError:
-        raise
-    except Exception as e:
-        # Primary model unavailable — try the fallback before giving up, since
-        # a stalled queue is worse than a slightly weaker analysis.
-        log.warning(f"[GROQ] {GROQ_MODEL} failed ({str(e)[:120]}); trying {GROQ_FALLBACK_MODEL}")
-        model_used = GROQ_FALLBACK_MODEL
-        raw, usage, finish = call_groq(prompt, model=GROQ_FALLBACK_MODEL)
+    # Step 2 — the model call, walking the rotation.
+    candidates = _available_models()
+    if not candidates:
+        raise GroqQuotaError("every model's daily budget is spent")
+
+    raw = usage = finish = model_used = None
+    last_error = None
+    for candidate in candidates:
+        try:
+            raw, usage, finish = call_groq(prompt, model=candidate)
+            model_used = candidate
+            break
+        except GroqDailyLimit as e:
+            # That model is out for the day; the next one has its own budget.
+            last_error = e
+            continue
+        except Exception as e:
+            # A transient fault on this model shouldn't stall the queue when
+            # another is available.
+            log.warning(f"[GROQ] {candidate} failed ({str(e)[:120]}); trying next model")
+            last_error = e
+            continue
+
+    if model_used is None:
+        raise GroqQuotaError(f"all models unavailable: {str(last_error)[:200]}")
 
     data = None
     try:

@@ -20,6 +20,7 @@ from config import GEMINI_MODEL
 from database.supabase_client import client
 from enrichment.claude_agent import ClaudeCreditsError
 from enrichment.groq_agent import GroqQuotaError
+from utils.text_compressor import compress_for_llm
 # Push notifications are intentionally not imported here: enrichment no longer
 # sends anything to Telegram. See _handle_notifications for why.
 
@@ -584,6 +585,53 @@ def _log_quota_exceeded(started_at, items_processed):
         log.error(f"[GEMINI] failed to write quota_exceeded log: {e}")
 
 
+# Minimum characters of real text — after HTML is stripped — an item needs
+# before it is worth an AI call.
+#
+# Sized from the actual offender: Vulners publishes entries titled only
+# "CVE-2026-68576" whose body is markup around a line like "Vulnerabilities for
+# packages: superset". That is ~460 raw characters but under 150 once tags are
+# gone, and it was a quarter of everything enriched. The model cannot analyse
+# what isn't there, so it returned empty low-severity rows that padded the brief
+# while consuming the daily token budget that real stories needed.
+#
+# 200 sits well below a genuine short article (real items compress to 500-3000)
+# and well above these stubs.
+MIN_ANALYZABLE_CHARS = 200
+
+
+def _drop_unanalyzable(jobs: list, stats: dict) -> list:
+    """Remove jobs with too little real text to analyse, and close them out.
+
+    Closed as 'done' rather than 'failed': reset_failed_jobs() returns failed
+    jobs to pending on every run, so marking these failed would retry them
+    forever. They are genuinely finished — there is nothing to extract.
+    """
+    keep, dropped = [], []
+    for job in jobs:
+        text = compress_for_llm(job.get("raw_content") or "",
+                                title=job.get("title") or "")["compressed"]
+        if len(text) < MIN_ANALYZABLE_CHARS:
+            dropped.append(job)
+        else:
+            keep.append(job)
+
+    for job in dropped:
+        try:
+            client.table("processing_jobs").update({
+                "status": "done",
+                "error_message": "skipped: too little text to analyse",
+            }).eq("id", job["job_id"]).execute()
+        except Exception as e:
+            log.warning(f"[ENRICH] could not close unanalyzable job: {str(e)[:120]}")
+
+    if dropped:
+        stats["skipped_empty"] = len(dropped)
+        log.info(f"[ENRICH] Skipped {len(dropped)} item(s) with no analysable content "
+                 f"— saved ~{len(dropped) * 2700} tokens")
+    return keep
+
+
 def _handle_notifications(job, result, stats):
     """Tally severity for this enriched item.
 
@@ -636,6 +684,7 @@ def run_enrichment(limit=50):
     out calls (Gemini free-tier protection; also keeps Claude well under its RPM).
     """
     stats = {"processed": 0, "succeeded": 0, "failed": 0, "skipped": 0,
+             "skipped_empty": 0,
              "critical": 0, "high": 0, "medium": 0, "low": 0,
              "quota_exceeded": False, "credits_exhausted": False,
              "contradictions": 0, "tokens_used": 0, "estimated_cost_usd": 0.0,
@@ -663,6 +712,7 @@ def run_enrichment(limit=50):
     # (CRITICAL/HIGH and high-value sources first), then cap how many we
     # actually process this run.
     fetched = get_pending_jobs(limit=limit)
+    fetched = _drop_unanalyzable(fetched, stats)
     ordered = prioritize_jobs(fetched)
     jobs = ordered[:MAX_ITEMS_PER_RUN]
     stats["skipped"] = len(fetched) - len(jobs)

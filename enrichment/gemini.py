@@ -657,7 +657,14 @@ def _readable_title(source_title, result: dict) -> str:
         if first:
             if len(first) > _TITLE_MAX:
                 first = first[:_TITLE_MAX].rsplit(" ", 1)[0].rstrip(" ,;:—-")
-            return f"{first[0].upper()}{first[1:]} ({cve})"
+            first = f"{first[0].upper()}{first[1:]}"
+            # Summaries usually cite the CVE inline ("A SQL injection flaw
+            # (CVE-2026-15403) was found in ..."), so appending it again would
+            # print the identifier twice in one title. Normalise the non-breaking
+            # hyphen the models often emit before comparing.
+            if cve in first.upper().replace("‑", "-"):
+                return first
+            return f"{first} ({cve})"
 
     return title
 

@@ -73,14 +73,34 @@ GROQ_MODELS = [m.strip() for m in os.getenv(
 _exhausted_until: dict = {}
 
 
+# Where the rotation resumes on the next item. Advancing per item — rather than
+# only when a model runs dry — is what removes the per-minute stall: each model
+# has its own tokens-per-minute allowance (8k/12k/8k), so cycling spreads the
+# load across all three instead of draining one and waiting ~20s for it to
+# refill while the others sit idle.
+_cursor = 0
+
+
 def _available_models() -> list:
-    """Rotation order with daily-exhausted models dropped."""
+    """Rotation order, starting at the cursor, with exhausted models dropped."""
     now = time.time()
     for model, until in list(_exhausted_until.items()):
         if now >= until:
             del _exhausted_until[model]
             log.info(f"[GROQ] {model} daily budget reset — back in rotation")
-    return [m for m in GROQ_MODELS if m not in _exhausted_until]
+
+    live = [m for m in GROQ_MODELS if m not in _exhausted_until]
+    if not live:
+        return []
+    # Rotate the list so consecutive items start on different models.
+    offset = _cursor % len(live)
+    return live[offset:] + live[:offset]
+
+
+def _advance_cursor():
+    """Move to the next model for the following item."""
+    global _cursor
+    _cursor += 1
 
 # Groq's free tier is genuinely free, so cost telemetry stays zero. The field is
 # kept because the payload builder and reports read it.
@@ -278,6 +298,10 @@ def enrich_with_groq(title, content, source_name, source_category, trust_score) 
 
     if model_used is None:
         raise GroqQuotaError(f"all models unavailable: {str(last_error)[:200]}")
+
+    # Next item starts on a different model, so no single per-minute allowance
+    # is drained while the others go unused.
+    _advance_cursor()
 
     data = None
     try:

@@ -56,21 +56,34 @@ GROQ_BASE_URL = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 # found. Rotating across three models roughly triples the daily ceiling at no
 # cost, because exhausting one does not touch the others' budgets.
 #
-# Order is by measured quality on a real Sandworm/wiper item:
-#   gpt-oss-120b   1.4s  graded it critical (correct), precise Hebrew terminology
-#   llama-3.3-70b  3.9s  solid, the previous primary
-#   gpt-oss-20b    0.5s  good Hebrew, slightly softer grading
-# Excluded deliberately: qwen3.6-27b fails JSON validation repeatedly, and
-# llama-3.1-8b-instant writes noticeably weaker Hebrew ("virus" for "wiper").
+# Order is by measured quality on a real Sandworm/wiper item, re-tested after
+# Groq withdrew llama-3.3-70b-versatile (it now 404s on every call):
+#   gpt-oss-120b    1.4s   8,000 tok/min   graded it critical, precise Hebrew
+#   compound-mini   3.0s  70,000 tok/min   valid JSON, correct grade, good Hebrew
+#   gpt-oss-20b     0.5s   8,000 tok/min   good Hebrew, slightly softer grading
+#
+# compound-mini earns its place on headroom: nearly 9x the per-minute allowance
+# of either gpt-oss model, which is what actually caps throughput here.
+#
+# Excluded deliberately: qwen3.6-27b has failed JSON validation on three
+# separate attempts, and groq/compound (the full variant) routes to
+# gpt-oss-120b internally — its 429 names that model — so it shares a budget
+# rather than adding one.
 GROQ_MODELS = [m.strip() for m in os.getenv(
     "GROQ_MODELS",
-    "openai/gpt-oss-120b,llama-3.3-70b-versatile,openai/gpt-oss-20b",
+    "openai/gpt-oss-120b,groq/compound-mini,openai/gpt-oss-20b",
 ).split(",") if m.strip()]
 
 # Models whose daily budget is spent, mapped to the UTC timestamp they free up
 # again. Process-local: a restart just retries and re-learns within one call,
 # which is cheaper than persisting state for something that resets daily.
 _exhausted_until: dict = {}
+
+# Models the API says do not exist. Unlike a spent budget this never recovers on
+# its own — Groq withdrew llama-3.3-70b-versatile and every item afterwards
+# still burned a request on it before falling through to the next model. Held
+# for the process lifetime so a genuinely restored model returns after a deploy.
+_unavailable: set = set()
 
 
 # Where the rotation resumes on the next item. Advancing per item — rather than
@@ -89,7 +102,8 @@ def _available_models() -> list:
             del _exhausted_until[model]
             log.info(f"[GROQ] {model} daily budget reset — back in rotation")
 
-    live = [m for m in GROQ_MODELS if m not in _exhausted_until]
+    live = [m for m in GROQ_MODELS
+            if m not in _exhausted_until and m not in _unavailable]
     if not live:
         return []
     # Rotate the list so consecutive items start on different models.
@@ -123,6 +137,10 @@ class GroqQuotaError(RuntimeError):
 
 class GroqDailyLimit(RuntimeError):
     """One model's daily budget is spent. Internal: the caller rotates onward."""
+
+
+class GroqModelGone(RuntimeError):
+    """The provider retired this model. Internal: the caller rotates onward."""
 
 
 def _retry_after_seconds(resp, body_lower: str):
@@ -222,6 +240,16 @@ def call_groq(user_prompt: str, max_tokens: int = MAX_TOKENS,
                 continue
             raise GroqQuotaError(body[:300])
 
+        if resp.status_code == 404 or "does not exist" in resp.text.lower():
+            # The model is gone, not busy. Providers retire models without
+            # notice, and treating that as a transient fault meant every
+            # subsequent item spent a request rediscovering it. Drop it from the
+            # rotation for good.
+            _unavailable.add(model)
+            log.error(f"[GROQ] {model} no longer exists at this provider — "
+                      f"removed from rotation permanently")
+            raise GroqModelGone(f"{model}: {resp.text[:200]}")
+
         if resp.status_code >= 400:
             raise RuntimeError(f"Groq HTTP {resp.status_code}: {resp.text[:250]}")
 
@@ -285,8 +313,9 @@ def enrich_with_groq(title, content, source_name, source_category, trust_score) 
             raw, usage, finish = call_groq(prompt, model=candidate)
             model_used = candidate
             break
-        except GroqDailyLimit as e:
-            # That model is out for the day; the next one has its own budget.
+        except (GroqDailyLimit, GroqModelGone) as e:
+            # Out for the day, or gone for good. Either way the next model has
+            # its own budget — move on without noise.
             last_error = e
             continue
         except Exception as e:

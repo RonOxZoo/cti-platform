@@ -19,6 +19,7 @@ Layers:
 This module is additive: the existing push notifications in telegram.py are
 untouched and keep working exactly as before.
 """
+import re
 import logging
 from datetime import datetime, timezone
 
@@ -62,6 +63,19 @@ LIST_FETCH_LIMIT = 200
 # Add "m": "medium" / "l": "low" here to expose those severities too.
 SEVERITY_CODES = {"c": "critical", "h": "high"}
 RECOMMENDED_CODE = "r"
+CAMPAIGN_CODE = "k"
+
+# A campaign is a named, ongoing operation — the thing you want to know is
+# spreading right now, as opposed to an isolated advisory. Two signals mark one:
+#
+#   1. the analysis named it ("Head Mare TrueConf campaign", "Project CAV3RN")
+#   2. it carries BOTH a threat actor and MITRE techniques — an attributed
+#      operation with a described attack chain, which is what a campaign is
+#
+# The length cap on the name matters: the model sometimes echoes the article
+# headline into campaign_name, and a 90-character "name" is a title, not a
+# campaign. Real ones are short.
+CAMPAIGN_NAME_MAX = 60
 
 _SEV_LABEL = {"critical": "🔴 Critical", "high": "🟠 High",
               "medium": "🟡 Medium", "low": "⚪ Low"}
@@ -69,7 +83,7 @@ _SEV_LABEL = {"critical": "🔴 Critical", "high": "🟠 High",
 _SELECT = (
     "id,title_en,title_he,summary_en,summary_he,severity,confidence_score,"
     "israel_relevance,iran_nexus,processed_at,enrichment_data,categories,"
-    "source_category,raw_items(url)"
+    "source_category,campaign_name,raw_items(url)"
 )
 
 # Paragraph labels for the 5-part expert summary.
@@ -178,10 +192,21 @@ def _fetch(severity: str = None) -> list:
     return rows
 
 
+def _is_campaign(item: dict) -> bool:
+    """True when the item describes a named or attributed ongoing operation."""
+    name = (item.get("campaign_name") or "").strip()
+    if name and len(name) <= CAMPAIGN_NAME_MAX:
+        return True
+    ed = item.get("enrichment_data") or {}
+    return bool(ed.get("actors")) and bool(ed.get("mitre"))
+
+
 def _items_for(code: str) -> list:
-    """Resolve a severity code to its ordered item list."""
+    """Resolve a view code to its ordered item list."""
     if code == RECOMMENDED_CODE:
         return [r for r in _fetch(None) if r["_score"] >= RECOMMENDED_THRESHOLD]
+    if code == CAMPAIGN_CODE:
+        return [r for r in _fetch(None) if _is_campaign(r)]
     return _fetch(SEVERITY_CODES.get(code))
 
 
@@ -197,6 +222,7 @@ def _counts() -> dict:
             log.error(f"[BOT] count({sev}) failed: {str(e)[:200]}")
             out[code] = 0
     out[RECOMMENDED_CODE] = len(_items_for(RECOMMENDED_CODE))
+    out[CAMPAIGN_CODE] = len(_items_for(CAMPAIGN_CODE))
     return out
 
 
@@ -208,13 +234,44 @@ def _title(item: dict) -> str:
     return (item.get("title_en") or item.get("title_he") or "(untitled)").strip()
 
 
+# Identifiers and version ranges eat a button's width without telling the reader
+# what the story is. They stay on the card, where there is room for them.
+_LABEL_NOISE = re.compile(
+    r"\(?\bCVE[-‑]\d{4}[-‑]\d{4,}\)?"
+    r"|\bOESA-\d{4}-\d+\b"
+    r"|<=\s*[\d.]+"
+    r"|\bversions?\s+up\s+to\s+[\d.]+",
+    re.I,
+)
+_LABEL_PREFIX = re.compile(
+    r"^\s*(incident(\s+occurred\s+where)?|report|advisory|alert|update)\s*[:\-–]?\s*",
+    re.I,
+)
+
+
 def _short_title(item: dict, limit: int = 40) -> str:
-    """Button label — Telegram truncates long labels unhelpfully, so trim here."""
+    """Button label — the subject, stripped to what fits and reads at a glance.
+
+    In the campaign view the campaign's own name leads instead of the article
+    headline: a list of operations should be scannable by operation, and
+    "Head Mare TrueConf campaign" identifies one where the source's headline
+    does not.
+    """
     mark = "🟢 " if item["_score"] >= RECOMMENDED_THRESHOLD else ""
-    t = _title(item)
-    if len(t) > limit:
-        t = t[: limit - 1].rstrip() + "…"
-    return f"{mark}{t}"
+
+    campaign = (item.get("campaign_name") or "").strip()
+    label = (campaign if campaign and len(campaign) <= CAMPAIGN_NAME_MAX
+             else _title(item))
+
+    label = _LABEL_NOISE.sub("", label)
+    label = _LABEL_PREFIX.sub("", label)
+    label = re.sub(r"\s{2,}", " ", label).strip(" ,;:–—-()")
+    if not label:
+        label = "(untitled)"
+    elif len(label) > limit:
+        label = label[:limit].rsplit(" ", 1)[0].rstrip(" ,;:–—-")
+
+    return f"{mark}{label}"
 
 
 def _date_of(item: dict) -> str:
@@ -241,13 +298,15 @@ def render_dashboard() -> tuple:
         "🛡 <b>CTI Intelligence</b>\n"
         "━━━━━━━━━━━━━━━\n"
         f"🔴 Critical ({counts.get('c', 0)}) · 🟠 High ({counts.get('h', 0)})\n"
-        f"🟢 מומלצים ({counts.get(RECOMMENDED_CODE, 0)})\n"
+        f"🎯 קמפיינים ({counts.get(CAMPAIGN_CODE, 0)}) · 🟢 מומלצים ({counts.get(RECOMMENDED_CODE, 0)})\n"
         "━━━━━━━━━━━━━━━\n"
         "בחר קטגוריה להצגת האירועים 👇"
     )
     kb = [
         [{"text": f"🔴 Critical ({counts.get('c', 0)})", "callback_data": "l:c:0"},
          {"text": f"🟠 High ({counts.get('h', 0)})", "callback_data": "l:h:0"}],
+        [{"text": f"🎯 קמפיינים ({counts.get(CAMPAIGN_CODE, 0)})",
+          "callback_data": f"l:{CAMPAIGN_CODE}:0"}],
         [{"text": f"🟢 מומלצים ({counts.get(RECOMMENDED_CODE, 0)})",
           "callback_data": f"l:{RECOMMENDED_CODE}:0"}],
     ]
@@ -265,7 +324,8 @@ def render_list(code: str, page: int) -> tuple:
     start = page * PAGE_SIZE
     chunk = items[start:start + PAGE_SIZE]
 
-    heading = {"c": "🔴 Critical", "h": "🟠 High"}.get(code, "🟢 מומלצים")
+    heading = {"c": "🔴 Critical", "h": "🟠 High",
+               CAMPAIGN_CODE: "🎯 קמפיינים פעילים"}.get(code, "🟢 מומלצים")
     text = (
         f"<b>{heading}</b> — {len(items)} אירועים\n"
         "━━━━━━━━━━━━━━━\n"
@@ -329,9 +389,15 @@ def render_card(code: str, page: int, idx: int) -> tuple:
     kb = [
         [{"text": "🇮🇱 עברית", "callback_data": f"v:{code}:{page}:{idx}:he"},
          {"text": "🇬🇧 English", "callback_data": f"v:{code}:{page}:{idx}:en"}],
-        [{"text": "⬅️ חזרה", "callback_data": f"l:{code}:{page}"},
-         {"text": "🏠 ראשי", "callback_data": "h"}],
     ]
+    # Offer the source here, not only after a language is chosen. The card is
+    # where the decision "is this worth my time" gets made, and going to the
+    # original report is a legitimate answer to that — often the fastest one.
+    url = _source_url(item)
+    if url.startswith(("http://", "https://")):
+        kb.append([{"text": "🔗 קרא במקור", "url": url}])
+    kb.append([{"text": "⬅️ חזרה", "callback_data": f"l:{code}:{page}"},
+               {"text": "🏠 ראשי", "callback_data": "h"}])
     return "\n".join(x for x in lines if x), kb
 
 

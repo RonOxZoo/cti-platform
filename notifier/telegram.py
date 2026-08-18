@@ -322,6 +322,47 @@ _BRIEF_BUTTON_CAP = 10
 _SEV_ICON = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "⚪"}
 
 
+# Button labels are read at a glance on a phone, so they carry the subject and
+# nothing else. Anything that costs width without aiding recognition is stripped.
+_BTN_MAX = 38
+_BTN_NOISE = re.compile(
+    r"\(?\bCVE[-‑]\d{4}[-‑]\d{4,}\)?"      # the identifier — belongs on the card, not the button
+    r"|\bOESA-\d{4}-\d+\b"                  # distro advisory ids
+    r"|<=\s*[\d.]+"                          # version ranges: "<= 2.9.9.6.9"
+    r"|\bversions?\s+up\s+to\s+[\d.]+",
+    re.I,
+)
+# Lead-ins that say nothing: "Incident: ...", "INCIDENT occurred where ..."
+_BTN_PREFIX = re.compile(
+    r"^\s*(incident(\s+occurred\s+where)?|report|advisory|alert|update)\s*[:\-–]?\s*",
+    re.I,
+)
+
+
+def _button_label(item: dict) -> str:
+    """Short, scannable subject for an inline button.
+
+    Deliberately different from the stored title. The full title keeps its CVE
+    identifier because that is what an analyst searches on — but on a 38-character
+    button that identifier crowds out the one thing the label has to convey: what
+    the story is about. Version ranges and "Incident:" lead-ins go for the same
+    reason.
+
+    Trimmed on a word boundary with no ellipsis: a label is a name, not a
+    sentence, so a clean cut reads better than a dangling "…".
+    """
+    label = _item_title(item)
+    label = _BTN_NOISE.sub("", label)
+    label = _BTN_PREFIX.sub("", label)
+    label = re.sub(r"\s{2,}", " ", label).strip(" ,;:–—-()")
+
+    if not label:
+        return "(untitled)"
+    if len(label) > _BTN_MAX:
+        label = label[:_BTN_MAX].rsplit(" ", 1)[0].rstrip(" ,;:–—-")
+    return f"{label[0].upper()}{label[1:]}" if label else "(untitled)"
+
+
 def _brief_keyboard(ranked_items: list) -> list:
     """One button per story, labelled with its subject, plus a navigation row.
 
@@ -336,11 +377,8 @@ def _brief_keyboard(ranked_items: list) -> list:
         if not item_id:
             continue
         icon = _SEV_ICON.get(_norm_sev(item.get("severity")), "⚪")
-        title = _item_title(item)
-        # Telegram wraps long labels badly on mobile; trim on a word boundary.
-        if len(title) > 42:
-            title = title[:42].rsplit(" ", 1)[0].rstrip(" ,;:—-")
-        rows.append([{"text": f"{icon} {title}", "callback_data": f"b:{item_id}"}])
+        rows.append([{"text": f"{icon} {_button_label(item)}",
+                      "callback_data": f"b:{item_id}"}])
 
     rows.append([
         {"text": "🔴 Critical", "callback_data": "l:c:0"},

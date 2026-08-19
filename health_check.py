@@ -388,7 +388,7 @@ def check_render(report: dict) -> None:
         if resp.status_code == 401:
             ok(f"POST /ingest  ->  HTTP 401  auth guard is working  ({ms}ms)")
         elif resp.status_code == 200:
-            warn(f"POST /ingest  ->  HTTP 200 without an API key — verify auth middleware")
+            warn("POST /ingest  ->  HTTP 200 without an API key — verify auth middleware")
         else:
             info(f"POST /ingest  ->  HTTP {resp.status_code}  ({ms}ms)")
     except Exception as exc:
@@ -557,7 +557,7 @@ def main() -> None:
     print(f"{_C}  Render:   {RENDER_SERVICE_URL}{_X}")
     if not HAS_SPELL:
         print(f"\n  {_Y}⚠  pyspellchecker not found — typo scan disabled{_X}")
-        print(f"     Run: pip install pyspellchecker")
+        print("     Run: pip install pyspellchecker")
     _bar()
 
     report = {

@@ -885,7 +885,7 @@ def run_enrichment(limit=50):
             stats["quota_exceeded"] = True
             stats["errors"].append(f"Groq quota exhausted — run stopped, job pending: {str(e)[:120]}")
             break
-        except ClaudeCreditsError as e:
+        except ClaudeCreditsError:
             # PRIORITY ZERO: Claude is out of credits. DO NOT mark failed and DO
             # NOT fall back to Gemini — leave the job PENDING so Claude processes
             # it once credits are added, and stop the run cleanly.

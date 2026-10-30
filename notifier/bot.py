@@ -27,7 +27,7 @@ import requests
 
 from config import TELEGRAM_BOT_TOKEN
 from database.supabase_client import client
-from notifier.telegram import _esc, _split_5, _trim_to_sentence
+from notifier.telegram import _esc, _split_5, _trim_to_sentence, display_subject
 from utils.defang import defang_all
 
 log = logging.getLogger(__name__)
@@ -230,8 +230,12 @@ def _counts() -> dict:
 def _title(item: dict) -> str:
     """Item subject. title_he is not populated by the enrichment pipeline, so
     this is English in practice — which suits CTI, where CVE ids, product and
-    actor names are English anyway."""
-    return (item.get("title_en") or item.get("title_he") or "(untitled)").strip()
+    actor names are English anyway.
+
+    Routed through display_subject so a bare-CVE title ("CVE-2026-1234") is
+    replaced by a readable headline (campaign name or the opening summary
+    sentence) on the card, in the full read, and as the button-label base."""
+    return display_subject(item)
 
 
 # Identifiers and version ranges eat a button's width without telling the reader

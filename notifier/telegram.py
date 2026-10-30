@@ -191,7 +191,7 @@ def send_critical_alert(item: dict) -> bool:
 
     severity = item.get("severity") or "Unknown"
     source = item.get("source") or item.get("source_name") or item.get("source_category") or "Unknown"
-    title = item.get("title") or item.get("title_en") or "(untitled)"
+    title = display_subject(item)
     confidence = item.get("confidence")
     if confidence is None:
         confidence = item.get("confidence_score")
@@ -294,9 +294,57 @@ def _excerpt(text: str, limit: int = _DAILY_EXCERPT_CHARS) -> str:
     return _trim_to_sentence(first, limit)
 
 
+# A subject that is nothing but a CVE identifier ("CVE-2026-1234", optionally in
+# parentheses) tells a reader scanning the brief nothing about the story. Detect
+# it so the display layer can recover a real headline instead.
+_BARE_CVE_SUBJECT = re.compile(r"^\s*\(?CVE[-‑]\d{4}[-‑]\d{4,}\)?\s*$", re.I)
+# Section labels a summary sometimes opens with ("INCIDENT: ...").
+_SUBJECT_LABEL = re.compile(r"^\s*[A-Z][A-Z /_-]{2,}\s*:\s*")
+_SUBJECT_MAX = 90
+
+
+def _first_sentence(text: str) -> str:
+    """Opening sentence of a summary, cleaned up to read as a headline."""
+    text = " ".join((text or "").split())
+    if not text:
+        return ""
+    text = _SUBJECT_LABEL.sub("", text)
+    first = re.split(r"(?<=[.!?])\s", text)[0].strip().rstrip(".")
+    # Drop a leading article so the subject starts on the substance.
+    first = re.sub(r"^(an?|the)\s+", "", first, flags=re.I)
+    return first
+
+
+def display_subject(item: dict) -> str:
+    """A human-readable subject for an item that is NEVER a bare CVE identifier.
+
+    Several vulnerability feeds title an entry with nothing but its CVE number,
+    which is unreadable in the brief, on a card, and on a button. When the stored
+    title is a bare CVE (or empty) we recover a real headline from, in order:
+    the campaign name, then the opening sentence of the English summary. Only if
+    neither exists do we fall back to the raw title.
+    """
+    title = (item.get("title_en") or item.get("title_he")
+             or item.get("title") or "").strip()
+    if title and not _BARE_CVE_SUBJECT.match(title):
+        return title
+
+    ed = item.get("enrichment_data") or {}
+    campaign = (item.get("campaign_name") or ed.get("campaign_name") or "").strip()
+    if campaign and len(campaign) <= 60:
+        return campaign
+
+    sent = _first_sentence(item.get("summary_en") or ed.get("summary_en") or "")
+    if sent:
+        if len(sent) > _SUBJECT_MAX:
+            sent = sent[:_SUBJECT_MAX].rsplit(" ", 1)[0].rstrip(" ,;:—-")
+        return f"{sent[0].upper()}{sent[1:]}"
+
+    return title or "(untitled)"
+
+
 def _item_title(item: dict) -> str:
-    return (item.get("title_en") or item.get("title_he")
-            or item.get("title") or "(untitled)")
+    return display_subject(item)
 
 
 def _item_actor(item: dict) -> str:
@@ -380,9 +428,12 @@ def _brief_keyboard(ranked_items: list) -> list:
         rows.append([{"text": f"{icon} {_button_label(item)}",
                       "callback_data": f"b:{item_id}"}])
 
+    # Jump straight to the two views that matter most from the brief: known
+    # campaigns (attributed, ongoing operations) and the critical queue. The
+    # "l:k:0" code maps to bot.CAMPAIGN_CODE; "l:c:0" to the critical severity.
     rows.append([
+        {"text": "🎯 קמפיינים", "callback_data": "l:k:0"},
         {"text": "🔴 Critical", "callback_data": "l:c:0"},
-        {"text": "🟠 High", "callback_data": "l:h:0"},
     ])
     rows.append([{"text": "🏠 תפריט ראשי", "callback_data": "h"}])
     return rows

@@ -108,7 +108,7 @@ def ingest():
             limit = DEFAULT_INGEST_CHUNK
         limit = max(1, min(limit, 200))
 
-    log.info(f"[INGEST] ═══════════════════════════════════════")
+    log.info("[INGEST] ═══════════════════════════════════════")
     log.info(f"[INGEST] Starting — {started_at}")
     log.info(f"[INGEST] Execution ID: {execution_id}")
     log.info(f"[INGEST] Chunk: offset={offset} limit={limit}")
@@ -184,14 +184,14 @@ def ingest():
         log.error(f"[INGEST] Failed to write log: {e}")
 
     # ── Summary ──────────────────────────────────────────────
-    log.info(f"[INGEST] ═══════════════════════════════════════")
+    log.info("[INGEST] ═══════════════════════════════════════")
     log.info(f"[INGEST] Sources processed : {stats['sources_processed']}")
     log.info(f"[INGEST] Sources failed    : {stats['sources_failed']}")
     log.info(f"[INGEST] Items fetched     : {stats['fetched']}")
     log.info(f"[INGEST] Items inserted    : {stats['inserted']}")
     log.info(f"[INGEST] Items skipped     : {stats['skipped']}")
     log.info(f"[INGEST] Errors            : {len(stats['errors'])}")
-    log.info(f"[INGEST] ═══════════════════════════════════════")
+    log.info("[INGEST] ═══════════════════════════════════════")
 
     return jsonify({
         "status": "success",
